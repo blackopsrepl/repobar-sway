@@ -38,4 +38,48 @@ class ForgejoTest < Minitest::Test
 
     assert_nil RepoBar::Core::GitHub.access_token(config)
   end
+
+  def test_fresh_rest_cache_short_circuits_network
+    config = build_config
+    uri = URI("https://api.github.com/repos/openclaw/openclaw")
+    RepoBar::Core::Cache.write_rest_entry(
+      config,
+      uri,
+      status: 200,
+      headers: { "etag" => "cached" },
+      body: JSON.generate(full_name: "openclaw/openclaw", name: "openclaw", owner: { login: "openclaw" })
+    )
+
+    Net::HTTP.stub(:start, ->(*) { raise "network should not be used for fresh cache" }) do
+      response = RepoBar::Core::GitHub.request(config, "/repos/openclaw/openclaw", token: "token")
+      assert_equal 200, response.status
+      assert_equal "openclaw/openclaw", response.data[:full_name]
+    end
+  end
+
+  def test_stale_rest_cache_uses_network
+    config = build_config
+    uri = URI("https://api.github.com/repos/openclaw/openclaw")
+    RepoBar::Core::Cache.write_rest_entry(
+      config,
+      uri,
+      status: 200,
+      headers: { "etag" => "stale" },
+      body: JSON.generate(full_name: "stale/repo")
+    )
+    path = RepoBar::Core::Cache.rest_path(config)
+    data = JSON.parse(File.read(path))
+    data.values.first["fetchedAt"] = (Time.now.utc - 3600).iso8601
+    File.write(path, "#{JSON.pretty_generate(data)}\n")
+    response = Net::HTTPOK.new("1.1", "200", "OK")
+    response.instance_variable_set(:@read, true)
+    response.instance_variable_set(:@body, JSON.generate(full_name: "openclaw/openclaw"))
+    http = Object.new
+    http.define_singleton_method(:request) { |_request| response }
+
+    Net::HTTP.stub(:start, lambda { |*_, &block| block.call(http) }) do
+      result = RepoBar::Core::GitHub.request(config, "/repos/openclaw/openclaw", token: "token")
+      assert_equal "openclaw/openclaw", result.data[:full_name]
+    end
+  end
 end

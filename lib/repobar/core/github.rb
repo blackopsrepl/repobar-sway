@@ -570,6 +570,9 @@ module RepoBar
 
       def request(config, path, token:)
         uri = URI.join("#{config.dig(:github, :apiHost).to_s.sub(%r{/*\z}, '')}/", path.sub(%r{\A/+}, ""))
+        fresh_cached = Cache.rest_entry(config, uri, ttl_seconds: rest_cache_ttl(config))
+        return Response.new(data: JSON.parse(fresh_cached["body"], symbolize_names: true), headers: fresh_cached["headers"], status: fresh_cached["status"].to_i) if fresh_cached
+
         request = Net::HTTP::Get.new(uri)
         request["Accept"] = forgejo?(config) ? "application/json" : "application/vnd.github+json"
         request["X-GitHub-Api-Version"] = "2022-11-28" if github?(config)
@@ -661,6 +664,11 @@ module RepoBar
 
       def limit_param(config)
         forgejo?(config) ? "limit" : "per_page"
+      end
+
+      def rest_cache_ttl(config)
+        seconds = config.dig(:runtime, :refreshSeconds).to_i
+        [[seconds, 30].max, 300].min
       end
     end
   end

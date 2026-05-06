@@ -26,6 +26,11 @@ module RepoBar
         File.join(state_dir(config), SNAPSHOT_FILE)
       end
 
+      def provider_snapshot_path(config, provider = nil)
+        selected = provider || config.dig(:github, :provider)
+        File.join(state_dir(config), "providers", "#{selected == "forgejo" ? "forgejo" : "github"}.json")
+      end
+
       def ui_state_path(config)
         File.join(state_dir(config), UI_STATE_FILE)
       end
@@ -54,7 +59,24 @@ module RepoBar
       def write_snapshot(config, snapshot)
         ensure_state_dir(config)
         atomic_write_json(snapshot_path(config), snapshot)
+        write_provider_snapshot(config, snapshot)
         notify_state_change(config)
+      end
+
+      def read_provider_snapshot(config, provider = nil)
+        path = provider_snapshot_path(config, provider)
+        return nil unless File.file?(path)
+
+        JSON.parse(File.read(path), symbolize_names: true)
+      rescue JSON::ParserError
+        nil
+      end
+
+      def write_provider_snapshot(config, snapshot, provider = nil)
+        return unless snapshot
+
+        ensure_state_dir(config)
+        atomic_write_json(provider_snapshot_path(config, provider || snapshot.dig(:config, :provider)), snapshot)
       end
 
       def build_snapshot(config, repositories, local_repositories, account, now = Time.now.utc)
@@ -209,6 +231,7 @@ module RepoBar
       end
 
       def atomic_write_json(path, payload)
+        FileUtils.mkdir_p(File.dirname(path))
         temp_path = "#{path}.tmp.#{$$}"
         File.write(temp_path, "#{JSON.pretty_generate(payload)}\n")
         File.chmod(0o600, temp_path)

@@ -55,9 +55,16 @@ module RepoBar
         raise ArgumentError, "provider must be github or forgejo." unless %w[github forgejo].include?(provider)
 
         config = Core::Config.load_config(config_path)
+        State.write_provider_snapshot(config, State.read_snapshot(config), config.dig(:github, :provider))
         saved = Core::Config.save_config(provider_config(config, provider, host), config_path)
         State.write_search_state(saved, State.default_search_state)
-        commit_projection(saved, repositories: [], local_repositories: [], account: { provider: provider })
+        cached = State.read_provider_snapshot(saved, provider)
+        if cached
+          State.write_snapshot(saved, cached)
+          signal_waybar(saved)
+        else
+          commit_projection(saved, repositories: [], local_repositories: [], account: { provider: provider })
+        end
         saved
       end
 

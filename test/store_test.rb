@@ -73,6 +73,27 @@ class StoreTest < Minitest::Test
     assert_equal "github", RepoBar::Core::Config.default_config.dig(:github, :provider)
   end
 
+  def test_provider_switch_restores_cached_provider_snapshot
+    config_path = write_test_config
+    github_config = RepoBar::Core::Config.load_config(config_path)
+    forgejo_config = RepoBar::Runtime::Store.provider_config(github_config, "forgejo")
+    forgejo_snapshot = RepoBar::Runtime::State.build_snapshot(
+      forgejo_config,
+      [sample_repo(name: "pvd/fizzy")],
+      [],
+      { provider: "forgejo", login: "forgejo:public" },
+      Time.now.utc
+    )
+    RepoBar::Runtime::State.write_provider_snapshot(forgejo_config, forgejo_snapshot, "forgejo")
+
+    RepoBar::Runtime::Store.set_provider(config_path, "forgejo")
+
+    saved = RepoBar::Core::Config.load_config(config_path)
+    snapshot = RepoBar::Runtime::State.read_snapshot(saved)
+    assert_equal "forgejo", snapshot.dig(:view, :summary, :provider)
+    assert_equal ["pvd/fizzy"], snapshot.dig(:view, :repositories).map { |repo| repo[:fullName] }
+  end
+
   def test_search_start_and_finish_are_state_transactions
     config_path = write_test_config
 

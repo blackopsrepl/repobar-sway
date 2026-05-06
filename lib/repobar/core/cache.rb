@@ -26,8 +26,15 @@ module RepoBar
         File.join(cache_dir(config), "rate_limits.json")
       end
 
-      def rest_entry(config, uri)
-        read_json(rest_path(config))[key(uri)]
+      def rest_entry(config, uri, ttl_seconds: nil)
+        entry = read_json(rest_path(config))[key(uri)]
+        return nil unless entry
+        return entry unless ttl_seconds
+
+        fetched = Format.parse_time(entry["fetchedAt"] || entry[:fetchedAt])
+        return nil unless fetched && fetched > Time.now.utc - ttl_seconds
+
+        entry
       end
 
       def write_rest_entry(config, uri, status:, headers:, body:)
