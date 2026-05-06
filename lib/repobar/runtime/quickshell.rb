@@ -7,13 +7,13 @@ module RepoBar
 
       def open(config_path, repository = nil)
         config = Core::Config.load_config(config_path)
-        Store.open_panel(config_path, repository)
+        Daemon.dispatch_action(config_path, type: "open_panel", repository: repository.to_s)
         ensure_running(config, config_path)
         status(config_path)
       end
 
       def close(config_path)
-        Store.close_panel(config_path)
+        Daemon.dispatch_action(config_path, type: "close_panel")
         status(config_path)
       end
 

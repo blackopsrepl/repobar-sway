@@ -13,6 +13,7 @@ module RepoBar
       SEARCH_STATE_FILE = "search.json"
       STATE_EVENT_FILE = "state-event.json"
       DAEMON_LOCK_FILE = "daemon.lock"
+      DAEMON_SOCKET_FILE = "daemon.sock"
       REFRESH_LOCK_FILE = "refresh.lock"
 
       module_function
@@ -35,6 +36,10 @@ module RepoBar
 
       def state_event_path(config)
         File.join(state_dir(config), STATE_EVENT_FILE)
+      end
+
+      def daemon_socket_path(config)
+        File.join(state_dir(config), DAEMON_SOCKET_FILE)
       end
 
       def read_snapshot(config)
@@ -177,6 +182,16 @@ module RepoBar
         file.flush
         file
       rescue Errno::EWOULDBLOCK, Errno::EAGAIN
+        nil
+      end
+
+      def daemon_pid(config)
+        path = lock_path(config, DAEMON_LOCK_FILE)
+        return nil unless File.file?(path)
+
+        pid = File.read(path).to_i
+        pid.positive? ? pid : nil
+      rescue StandardError
         nil
       end
 

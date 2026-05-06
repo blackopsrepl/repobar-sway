@@ -51,44 +51,43 @@ module RepoBar
         )
       end
 
-      def set_provider(config_path, provider, host: nil, effects: true)
+      def set_provider(config_path, provider, host: nil)
         raise ArgumentError, "provider must be github or forgejo." unless %w[github forgejo].include?(provider)
 
         config = Core::Config.load_config(config_path)
         saved = Core::Config.save_config(provider_config(config, provider, host), config_path)
         State.write_search_state(saved, State.default_search_state)
         commit_projection(saved, repositories: [], local_repositories: [], account: { provider: provider })
-        spawn_refresh_effect(config_path) if effects
         saved
       end
 
-      def pin_repo(config_path, full_name, effects: true)
-        mutate_repo_visibility(config_path, full_name, effects: effects) do |repo_list, normalized|
+      def pin_repo(config_path, full_name)
+        mutate_repo_visibility(config_path, full_name) do |repo_list, normalized|
           repo_list[:hiddenRepositories].delete(normalized)
           repo_list[:pinnedRepositories] |= [normalized]
         end
       end
 
-      def unpin_repo(config_path, full_name, effects: true)
-        mutate_repo_visibility(config_path, full_name, effects: effects) do |repo_list, normalized|
+      def unpin_repo(config_path, full_name)
+        mutate_repo_visibility(config_path, full_name) do |repo_list, normalized|
           repo_list[:pinnedRepositories].delete(normalized)
         end
       end
 
-      def hide_repo(config_path, full_name, effects: true)
-        mutate_repo_visibility(config_path, full_name, effects: effects) do |repo_list, normalized|
+      def hide_repo(config_path, full_name)
+        mutate_repo_visibility(config_path, full_name) do |repo_list, normalized|
           repo_list[:pinnedRepositories].delete(normalized)
           repo_list[:hiddenRepositories] |= [normalized]
         end
       end
 
-      def show_repo(config_path, full_name, effects: true)
-        mutate_repo_visibility(config_path, full_name, effects: effects) do |repo_list, normalized|
+      def show_repo(config_path, full_name)
+        mutate_repo_visibility(config_path, full_name) do |repo_list, normalized|
           repo_list[:hiddenRepositories].delete(normalized)
         end
       end
 
-      def start_search(config_path, query, limit:, effects: true)
+      def start_search(config_path, query, limit:)
         config = Core::Config.load_config(config_path)
         clean_query = query.to_s.strip
         raise ArgumentError, "Search query required." if clean_query.empty?
@@ -103,7 +102,6 @@ module RepoBar
           updatedAt: timestamp
         }
         State.write_search_state(config, state)
-        spawn_search_effect(config_path, clean_query, limit, state[:requestId]) if effects
         State.read_search_state(config)
       end
 
@@ -161,14 +159,6 @@ module RepoBar
         finish_search(config_path, request_id, query, error: e.message)
       end
 
-      def spawn_refresh_effect(config_path)
-        Core::Process.spawn_detached(repobar_executable, ["effect", "refresh", "--config", File.expand_path(config_path)])
-      end
-
-      def spawn_search_effect(config_path, query, limit, request_id)
-        Core::Process.spawn_detached(repobar_executable, ["effect", "search", query, "--limit", limit.to_i.to_s, "--request-id", request_id, "--config", File.expand_path(config_path)])
-      end
-
       def signal_waybar(config)
         signal = config.dig(:runtime, :waybarSignal).to_i
         return if signal <= 0
@@ -178,14 +168,13 @@ module RepoBar
         nil
       end
 
-      def mutate_repo_visibility(config_path, full_name, effects:)
+      def mutate_repo_visibility(config_path, full_name)
         normalized = normalize_full_name(full_name)
         config = Core::Config.load_config(config_path)
         repo_list = config[:repoList]
         yield(repo_list, normalized)
         saved = Core::Config.save_config(config, config_path)
         project_repo_visibility(saved, normalized)
-        spawn_refresh_effect(config_path) if effects
         saved[:repoList]
       end
 

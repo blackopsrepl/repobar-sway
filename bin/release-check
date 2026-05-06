@@ -8,6 +8,14 @@ TMP_STATE="$(mktemp -d -t repobar-release-check-state-XXXXXX)"
 TMP_FORGEJO_STATE="$(mktemp -d -t repobar-release-check-forgejo-state-XXXXXX)"
 
 cleanup() {
+  for state_dir in "$TMP_STATE" "$TMP_FORGEJO_STATE"; do
+    if [ -f "$state_dir/daemon.lock" ]; then
+      pid="$(cat "$state_dir/daemon.lock" 2>/dev/null || true)"
+      if [ -n "${pid:-}" ]; then
+        kill "$pid" 2>/dev/null || true
+      fi
+    fi
+  done
   rm -f "$TMP_CONFIG"
   rm -f "$TMP_FORGEJO_CONFIG"
   rm -rf "$TMP_STATE"
@@ -59,14 +67,15 @@ set_config_state_dir "$TMP_CONFIG" "$TMP_STATE"
 run_step "config validate" bin/repobar config validate --config "$TMP_CONFIG"
 run_step "waybar render" bash -lc "bin/repobar waybar render --config '$TMP_CONFIG' >/dev/null"
 run_step "ui status" bash -lc "bin/repobar ui status --config '$TMP_CONFIG' --format json --pretty >/dev/null"
-run_step "forgejo config" bash -lc "rm -f '$TMP_FORGEJO_CONFIG'; bin/repobar config forgejo --config '$TMP_FORGEJO_CONFIG' >/dev/null"
+run_step "forgejo config" bash -lc "rm -f '$TMP_FORGEJO_CONFIG'; bin/repobar config init --config '$TMP_FORGEJO_CONFIG' --format json >/dev/null"
 set_config_state_dir "$TMP_FORGEJO_CONFIG" "$TMP_FORGEJO_STATE"
+run_step "forgejo provider" bash -lc "bin/repobar provider forgejo --config '$TMP_FORGEJO_CONFIG' >/dev/null"
 run_step "forgejo auth status" bin/repobar auth status --config "$TMP_FORGEJO_CONFIG"
 run_step "forgejo refresh" bash -lc "bin/repobar refresh --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --limit 3 >/dev/null"
 run_step "forgejo recent lists" bash -lc "bin/repobar pulls pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar ci pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar tags pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar branches pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar commits pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar activity pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null"
 run_step "settings surface" bash -lc "bin/repobar pin pvd/fizzy --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings set repo-limit 4 --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings show --config '$TMP_FORGEJO_CONFIG' --json >/dev/null"
 run_step "repo filters" bash -lc "bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --scope pinned --limit 2 >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --filter work --limit 2 >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --forks --archived --age 365 --limit 2 >/dev/null; bin/repobar settings set show-contribution-header false --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings set heatmap-span 12m --config '$TMP_FORGEJO_CONFIG' >/dev/null"
-run_step "repo search" bash -lc "bin/repobar search fizzy --config '$TMP_FORGEJO_CONFIG' --json | ruby -rjson -e 'exit(JSON.parse(STDIN.read).any? ? 0 : 1)'"
+run_step "repo search" bash -lc "bin/repobar search fizzy --config '$TMP_FORGEJO_CONFIG' --json | ruby -rjson -e 'state = JSON.parse(STDIN.read); exit(state[\"status\"] == \"loading\" && state[\"query\"] == \"fizzy\" ? 0 : 1)'"
 run_step "cache surface" bash -lc "bin/repobar cache status --config '$TMP_FORGEJO_CONFIG' --json >/dev/null; bin/repobar rate-limits --config '$TMP_FORGEJO_CONFIG' --json >/dev/null"
 run_step "archive import" run_archive_import_check
 

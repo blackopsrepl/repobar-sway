@@ -65,8 +65,6 @@ module RepoBar
         run_repos_command(args, config_path)
       when "search"
         run_search_command(args, config_path)
-      when "effect"
-        run_effect_command(args, config_path)
       when "repo", "issues", "pulls", "releases", "ci", "discussions", "tags", "branches", "contributors", "commits", "activity", "contributions"
         run_repo_detail_command(command, args, config_path)
       when "help", "-h", "--help"
@@ -110,7 +108,6 @@ module RepoBar
         archived: false,
         pinned_only: false,
         no_wrap: false,
-        request_id: nil,
         positionals: []
       }
       index = 0
@@ -200,9 +197,6 @@ module RepoBar
           args[:width] = argv[index].to_i
         when "--no-wrap"
           args[:no_wrap] = true
-        when "--request-id"
-          index += 1
-          args[:request_id] = argv[index]
         when "--no-color"
           args[:no_color] = true
         else
@@ -269,12 +263,12 @@ module RepoBar
       end
       if subcommand == "forgejo"
         host = args[:positionals][1] || "http://vigilance:3002"
-        config = Runtime::Store.set_provider(config_path, "forgejo", host: host)
+        config = Runtime::Daemon.dispatch_action(config_path, type: "set_provider", provider: "forgejo", host: host)
         args[:format] == "json" ? print_json(config, args) : puts("Configured Forgejo at #{config.dig(:github, :host)}.")
         return 0
       end
       if subcommand == "github"
-        config = Runtime::Store.set_provider(config_path, "github")
+        config = Runtime::Daemon.dispatch_action(config_path, type: "set_provider", provider: "github")
         args[:format] == "json" ? print_json(config, args) : puts("Configured GitHub.com.")
         return 0
       end
@@ -295,7 +289,7 @@ module RepoBar
       provider = args[:positionals].first.to_s.downcase
       raise ArgumentError, "provider must be github or forgejo." unless %w[github forgejo].include?(provider)
 
-      config = Runtime::Store.set_provider(config_path, provider)
+      config = Runtime::Daemon.dispatch_action(config_path, type: "set_provider", provider: provider)
       args[:format] == "json" ? print_json(config, args) : puts("Switched to #{provider == 'github' ? 'GitHub' : 'Forgejo'}.")
       0
     end
@@ -388,33 +382,18 @@ module RepoBar
     def run_search_command(args, config_path)
       subcommand = args[:positionals].first.to_s
       if subcommand == "select"
-        state = Runtime::Store.select_search_result(config_path, args[:positionals][1])
+        state = Runtime::Daemon.dispatch_action(config_path, type: "search_select", fullName: args[:positionals][1])
         args[:format] == "json" ? print_json(state, args) : puts("Selected #{state[:selectedFullName]}.")
         return 0
       end
 
       query = args[:positionals].join(" ")
       limit = args[:limit].to_i.positive? ? args[:limit].to_i : 10
-      state = Runtime::Store.start_search(config_path, query, limit: limit)
+      state = Runtime::Daemon.dispatch_action(config_path, type: "search_start", query: query, limit: limit)
       if args[:format] == "json"
         print_json(state, args)
       else
         puts "Searching #{state[:query]}."
-      end
-      0
-    end
-
-    def run_effect_command(args, config_path)
-      subcommand = args[:positionals].first
-      case subcommand
-      when "refresh"
-        Runtime::Daemon.refresh(config_path)
-      when "search"
-        query = args[:positionals][1].to_s
-        limit = args[:limit].to_i.positive? ? args[:limit].to_i : 10
-        Runtime::Store.search_effect(config_path, query, limit, args[:request_id])
-      else
-        raise ArgumentError, "Unknown effect: #{subcommand}"
       end
       0
     end
@@ -610,10 +589,10 @@ module RepoBar
     def run_repo_visibility_command(command, args, config_path)
       full_name = args[:positionals].first
       repo_list = case command
-                  when "pin" then Runtime::Store.pin_repo(config_path, full_name)
-                  when "unpin" then Runtime::Store.unpin_repo(config_path, full_name)
-                  when "hide" then Runtime::Store.hide_repo(config_path, full_name)
-                  when "show" then Runtime::Store.show_repo(config_path, full_name)
+                  when "pin" then Runtime::Daemon.dispatch_action(config_path, type: "pin", fullName: full_name)
+                  when "unpin" then Runtime::Daemon.dispatch_action(config_path, type: "unpin", fullName: full_name)
+                  when "hide" then Runtime::Daemon.dispatch_action(config_path, type: "hide", fullName: full_name)
+                  when "show" then Runtime::Daemon.dispatch_action(config_path, type: "show", fullName: full_name)
                   end
       args[:format] == "json" ? print_json(repo_list, args) : puts("#{command} #{full_name.to_s.downcase}")
       0
