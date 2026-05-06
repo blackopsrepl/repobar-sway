@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "time"
-
 module RepoBar
   module Runtime
     module QuickShell
@@ -9,22 +7,13 @@ module RepoBar
 
       def open(config_path, repository = nil)
         config = Core::Config.load_config(config_path)
-        State.ensure_ui_state(config)
-        state = State.read_ui_state(config)
-        state[:open] = true
-        state[:focusRepository] = repository.to_s if repository
-        state[:requestedAt] = Time.now.utc.iso8601
-        State.write_ui_state(config, state)
+        Store.open_panel(config_path, repository)
         ensure_running(config, config_path)
         status(config_path)
       end
 
       def close(config_path)
-        config = Core::Config.load_config(config_path)
-        state = State.read_ui_state(config)
-        state[:open] = false
-        state[:requestedAt] = Time.now.utc.iso8601
-        State.write_ui_state(config, state)
+        Store.close_panel(config_path)
         status(config_path)
       end
 
@@ -40,6 +29,7 @@ module RepoBar
           ui: State.read_ui_state(config),
           snapshotPath: State.snapshot_path(config),
           uiPath: State.ui_state_path(config),
+          searchPath: State.search_state_path(config),
           stateEventPath: State.state_event_path(config),
           quickShellRunning: running?(config)
         }

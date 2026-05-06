@@ -65,6 +65,8 @@ module RepoBar
         run_repos_command(args, config_path)
       when "search"
         run_search_command(args, config_path)
+      when "effect"
+        run_effect_command(args, config_path)
       when "repo", "issues", "pulls", "releases", "ci", "discussions", "tags", "branches", "contributors", "commits", "activity", "contributions"
         run_repo_detail_command(command, args, config_path)
       when "help", "-h", "--help"
@@ -108,6 +110,7 @@ module RepoBar
         archived: false,
         pinned_only: false,
         no_wrap: false,
+        request_id: nil,
         positionals: []
       }
       index = 0
@@ -197,6 +200,9 @@ module RepoBar
           args[:width] = argv[index].to_i
         when "--no-wrap"
           args[:no_wrap] = true
+        when "--request-id"
+          index += 1
+          args[:request_id] = argv[index]
         when "--no-color"
           args[:no_color] = true
         else
@@ -263,14 +269,12 @@ module RepoBar
       end
       if subcommand == "forgejo"
         host = args[:positionals][1] || "http://vigilance:3002"
-        config = Core::Config.load_config(config_path)
-        config = configure_provider(config, "forgejo", host)
-        config = Core::Config.save_config(config, config_path)
+        config = Runtime::Store.set_provider(config_path, "forgejo", host: host)
         args[:format] == "json" ? print_json(config, args) : puts("Configured Forgejo at #{config.dig(:github, :host)}.")
         return 0
       end
       if subcommand == "github"
-        config = Core::Config.save_config(configure_provider(Core::Config.load_config(config_path), "github"), config_path)
+        config = Runtime::Store.set_provider(config_path, "github")
         args[:format] == "json" ? print_json(config, args) : puts("Configured GitHub.com.")
         return 0
       end
@@ -291,35 +295,13 @@ module RepoBar
       provider = args[:positionals].first.to_s.downcase
       raise ArgumentError, "provider must be github or forgejo." unless %w[github forgejo].include?(provider)
 
-      config = Core::Config.load_config(config_path)
-      config = configure_provider(config, provider)
-      Core::Config.save_config(config, config_path)
-      snapshot = Runtime::Daemon.refresh(config_path)
-      args[:format] == "json" ? print_json(snapshot, args) : puts("Switched to #{provider == 'github' ? 'GitHub' : 'Forgejo'}.")
+      config = Runtime::Store.set_provider(config_path, provider)
+      args[:format] == "json" ? print_json(config, args) : puts("Switched to #{provider == 'github' ? 'GitHub' : 'Forgejo'}.")
       0
     end
 
     def configure_provider(config, provider, host = nil)
-      if provider == "forgejo"
-        forgejo_host = host || "http://vigilance:3002"
-        return config.merge(
-          github: config[:github].merge(
-            provider: "forgejo",
-            host: forgejo_host,
-            apiHost: "#{forgejo_host.sub(%r{/*\z}, '')}/api/v1",
-            authSource: "env"
-          )
-        )
-      end
-
-      config.merge(
-        github: config[:github].merge(
-          provider: "github",
-          host: "https://github.com",
-          apiHost: "https://api.github.com",
-          authSource: "gh"
-        )
-      )
+      Runtime::Store.provider_config(config, provider, host)
     end
 
     def run_local_command(args, config_path)
@@ -404,16 +386,35 @@ module RepoBar
     end
 
     def run_search_command(args, config_path)
-      config = Core::Config.load_config(config_path)
-      query = args[:positionals].first.to_s
-      raise ArgumentError, "Search query required." if query.strip.empty?
+      subcommand = args[:positionals].first.to_s
+      if subcommand == "select"
+        state = Runtime::Store.select_search_result(config_path, args[:positionals][1])
+        args[:format] == "json" ? print_json(state, args) : puts("Selected #{state[:selectedFullName]}.")
+        return 0
+      end
 
+      query = args[:positionals].join(" ")
       limit = args[:limit].to_i.positive? ? args[:limit].to_i : 10
-      rows = Core::GitHub.search_repositories(config, Core::GitHub.access_token(config), query, limit)
+      state = Runtime::Store.start_search(config_path, query, limit: limit)
       if args[:format] == "json"
-        print_json(rows, args)
+        print_json(state, args)
       else
-        rows.each { |repo| puts "#{repo[:fullName]} #{repo[:url]}" }
+        puts "Searching #{state[:query]}."
+      end
+      0
+    end
+
+    def run_effect_command(args, config_path)
+      subcommand = args[:positionals].first
+      case subcommand
+      when "refresh"
+        Runtime::Daemon.refresh(config_path)
+      when "search"
+        query = args[:positionals][1].to_s
+        limit = args[:limit].to_i.positive? ? args[:limit].to_i : 10
+        Runtime::Store.search_effect(config_path, query, limit, args[:request_id])
+      else
+        raise ArgumentError, "Unknown effect: #{subcommand}"
       end
       0
     end
@@ -608,26 +609,13 @@ module RepoBar
 
     def run_repo_visibility_command(command, args, config_path)
       full_name = args[:positionals].first
-      raise ArgumentError, "Repository required as owner/name." unless full_name.to_s.match?(%r{\A[^/\s]+/[^/\s]+\z})
-
-      normalized = full_name.downcase
-      config = Core::Config.load_config(config_path)
-      repo_list = config[:repoList]
-      case command
-      when "pin"
-        repo_list[:hiddenRepositories].delete(normalized)
-        repo_list[:pinnedRepositories] |= [normalized]
-      when "unpin"
-        repo_list[:pinnedRepositories].delete(normalized)
-      when "hide"
-        repo_list[:pinnedRepositories].delete(normalized)
-        repo_list[:hiddenRepositories] |= [normalized]
-      when "show"
-        repo_list[:hiddenRepositories].delete(normalized)
-      end
-      saved = Core::Config.save_config(config, config_path)
-      Runtime::Daemon.refresh(config_path, config: saved)
-      args[:format] == "json" ? print_json(saved[:repoList], args) : puts("#{command} #{normalized}")
+      repo_list = case command
+                  when "pin" then Runtime::Store.pin_repo(config_path, full_name)
+                  when "unpin" then Runtime::Store.unpin_repo(config_path, full_name)
+                  when "hide" then Runtime::Store.hide_repo(config_path, full_name)
+                  when "show" then Runtime::Store.show_repo(config_path, full_name)
+                  end
+      args[:format] == "json" ? print_json(repo_list, args) : puts("#{command} #{full_name.to_s.downcase}")
       0
     end
 

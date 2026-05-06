@@ -10,6 +10,7 @@ module RepoBar
       SNAPSHOT_VERSION = 1
       SNAPSHOT_FILE = "snapshot.json"
       UI_STATE_FILE = "ui.json"
+      SEARCH_STATE_FILE = "search.json"
       STATE_EVENT_FILE = "state-event.json"
       DAEMON_LOCK_FILE = "daemon.lock"
       REFRESH_LOCK_FILE = "refresh.lock"
@@ -26,6 +27,10 @@ module RepoBar
 
       def ui_state_path(config)
         File.join(state_dir(config), UI_STATE_FILE)
+      end
+
+      def search_state_path(config)
+        File.join(state_dir(config), SEARCH_STATE_FILE)
       end
 
       def state_event_path(config)
@@ -89,11 +94,38 @@ module RepoBar
         notify_state_change(config)
       end
 
+      def read_search_state(config)
+        path = search_state_path(config)
+        return default_search_state unless File.file?(path)
+
+        normalize_search_state(JSON.parse(File.read(path), symbolize_names: true))
+      rescue JSON::ParserError
+        default_search_state
+      end
+
+      def write_search_state(config, search_state)
+        ensure_state_dir(config)
+        atomic_write_json(search_state_path(config), normalize_search_state(search_state))
+        notify_state_change(config)
+      end
+
       def default_ui_state
         {
           open: false,
           focusRepository: "",
           requestedAt: ""
+        }
+      end
+
+      def default_search_state
+        {
+          status: "idle",
+          query: "",
+          requestId: "",
+          selectedFullName: "",
+          results: [],
+          error: "",
+          updatedAt: ""
         }
       end
 
@@ -106,10 +138,25 @@ module RepoBar
         }
       end
 
+      def normalize_search_state(search_state)
+        state = default_search_state.merge((search_state || {}).transform_keys(&:to_sym))
+        status = %w[idle loading ready error].include?(state[:status].to_s) ? state[:status].to_s : "idle"
+        {
+          status: status,
+          query: state[:query].to_s,
+          requestId: state[:requestId].to_s,
+          selectedFullName: state[:selectedFullName].to_s.downcase,
+          results: Array(state[:results]),
+          error: state[:error].to_s,
+          updatedAt: state[:updatedAt].to_s
+        }
+      end
+
       def ensure_ui_state(config)
         ensure_state_dir(config)
         ensure_state_event(config)
         write_ui_state(config, default_ui_state) unless File.file?(ui_state_path(config))
+        write_search_state(config, default_search_state) unless File.file?(search_state_path(config))
       end
 
       def with_refresh_lock(config)

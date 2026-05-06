@@ -108,6 +108,7 @@ module RepoBar
           traffic: repo[:traffic],
           heatmap: heatmap_view(repo[:heatmap]),
           local: local,
+          pending: !!repo[:pending],
           status: repo_status(repo),
           error: repo[:error]
         }
@@ -138,6 +139,7 @@ module RepoBar
 
       def repo_status(repo)
         return "error" if repo[:error].to_s != ""
+        return "pending" if repo[:pending]
         return "ci-failing" if repo[:ciStatus] == "failing"
         return "dirty" if repo.dig(:local, :dirty)
         return "work" if repo.dig(:stats, :openPulls).to_i.positive? || repo.dig(:stats, :openIssues).to_i.positive?
