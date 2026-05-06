@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+require_relative "repobar/core/config"
+require_relative "repobar/core/format"
+require_relative "repobar/core/cache"
+require_relative "repobar/core/github"
+require_relative "repobar/core/local_git"
+require_relative "repobar/core/process"
+require_relative "repobar/runtime/presenter"
+require_relative "repobar/runtime/state"
+require_relative "repobar/runtime/daemon"
+require_relative "repobar/runtime/quickshell"
+require_relative "repobar/runtime/waybar"
+require_relative "repobar/cli"
