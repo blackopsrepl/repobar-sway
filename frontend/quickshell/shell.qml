@@ -12,12 +12,20 @@ ShellRoot {
     property string repobarBin: Quickshell.env("REPOBAR_BIN") || "repobar"
     property string snapshotPath: stateDir + "/snapshot.json"
     property string uiPath: stateDir + "/ui.json"
+    property string searchPath: stateDir + "/search.json"
     property string stateEventPath: stateDir + "/state-event.json"
     property string textFont: "Fira Code"
 
     property var viewData: snapshotAdapter.view && snapshotAdapter.view.summary ? snapshotAdapter.view : ({ summary: {}, chip: {}, repositories: [] })
     property var repositories: viewData.repositories || []
-    property var searchResults: []
+    property var searchData: searchAdapter.status ? ({
+        status: searchAdapter.status,
+        query: searchAdapter.query,
+        selectedFullName: searchAdapter.selectedFullName,
+        results: searchAdapter.results || [],
+        error: searchAdapter.error
+    }) : ({ status: "idle", query: "", selectedFullName: "", results: [], error: "" })
+    property var searchResults: searchData.results || []
 
     function statusColor(status) {
         if (status === "error" || status === "ci-failing") {
@@ -25,6 +33,9 @@ ShellRoot {
         }
         if (status === "dirty" || status === "work") {
             return "#E5C07B"
+        }
+        if (status === "pending") {
+            return "#85E1FB"
         }
         return "#82FB9C"
     }
@@ -39,24 +50,27 @@ ShellRoot {
     }
 
     function runSearch() {
-        if (repoInput.text.trim().length === 0) {
-            root.searchResults = []
+        var query = repoInput.text.trim()
+        if (query.length === 0) {
             return
         }
-        if (searchRunner.running) {
-            searchRunner.signal(9)
-            searchRunner.running = false
-        }
-        searchRunner.command = [root.repobarBin, "search", repoInput.text, "--json", "--config", root.configPath]
-        searchRunner.running = true
+        runRepobar(["search", query, "--limit", "8"])
+    }
+
+    function closePanel() {
+        runRepobar(["ui", "close"])
     }
 
     function reloadState() {
         snapshotFile.reload()
         uiFile.reload()
+        searchFile.reload()
     }
 
     function trafficText(repo) {
+        if (repo.pending) {
+            return "Refreshing..."
+        }
         if (!repo.traffic) {
             return "Traffic unavailable"
         }
@@ -67,32 +81,41 @@ ShellRoot {
         return (viewData.summary.provider || "github") === provider
     }
 
+    function repoUrl(repo) {
+        return repo.url || ("https://github.com/" + repo.fullName)
+    }
+
+    function isPinned(fullName) {
+        var normalized = (fullName || "").toString().toLowerCase()
+        for (var index = 0; index < root.repositories.length; index++) {
+            var repo = root.repositories[index]
+            if ((repo.fullName || "").toString().toLowerCase() === normalized && repo.pinned) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function searchStatusText() {
+        if (searchData.status === "loading") {
+            return "Searching " + searchData.query + "..."
+        }
+        if (searchData.status === "error") {
+            return searchData.error || "Search failed"
+        }
+        if (searchData.status === "ready" && searchResults.length === 0) {
+            return "No repositories found for " + searchData.query
+        }
+        if (searchData.status === "ready") {
+            return searchResults.length + " results for " + searchData.query
+        }
+        return ""
+    }
+
     Process {
         id: actionRunner
         running: false
         stdout: StdioCollector {}
-        stderr: StdioCollector {
-            onStreamFinished: {
-                if (text.trim().length) {
-                    console.log(text.trim())
-                }
-            }
-        }
-    }
-
-    Process {
-        id: searchRunner
-        running: false
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    root.searchResults = JSON.parse(text)
-                } catch (error) {
-                    root.searchResults = []
-                    console.log(error)
-                }
-            }
-        }
         stderr: StdioCollector {
             onStreamFinished: {
                 if (text.trim().length) {
@@ -130,13 +153,30 @@ ShellRoot {
         path: root.uiPath
         watchChanges: true
         onFileChanged: reload()
-        onAdapterUpdated: writeAdapter()
 
         JsonAdapter {
             id: uiAdapter
             property bool open: false
             property string focusRepository: ""
             property string requestedAt: ""
+        }
+    }
+
+    FileView {
+        id: searchFile
+        path: root.searchPath
+        watchChanges: true
+        onFileChanged: reload()
+
+        JsonAdapter {
+            id: searchAdapter
+            property string status: "idle"
+            property string query: ""
+            property string requestId: ""
+            property string selectedFullName: ""
+            property var results: []
+            property string error: ""
+            property string updatedAt: ""
         }
     }
 
@@ -158,6 +198,17 @@ ShellRoot {
             top: 36
             right: 12
         }
+        onVisibleChanged: {
+            if (visible) {
+                repoInput.forceActiveFocus()
+            }
+        }
+
+        Shortcut {
+            sequence: "Esc"
+            context: Qt.WindowShortcut
+            onActivated: root.closePanel()
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -165,6 +216,8 @@ ShellRoot {
             border.color: "#82FB9C"
             border.width: 1
             radius: 4
+            focus: true
+            Keys.onEscapePressed: root.closePanel()
 
             ColumnLayout {
                 anchors.fill: parent
@@ -215,7 +268,7 @@ ShellRoot {
                         }
                         Button {
                             text: "Close"
-                            onClicked: uiAdapter.open = false
+                            onClicked: root.closePanel()
                         }
                     }
 
@@ -226,9 +279,11 @@ ShellRoot {
                         TextField {
                             id: repoInput
                             Layout.fillWidth: true
-                            Layout.maximumWidth: 320
-                            placeholderText: "owner/name"
+                            Layout.maximumWidth: 360
+                            placeholderText: "owner/name or search"
                             font.family: root.textFont
+                            onAccepted: root.runSearch()
+                            Keys.onEscapePressed: root.closePanel()
                         }
                         Button {
                             text: "Pin"
@@ -240,7 +295,7 @@ ShellRoot {
                         }
                         Button {
                             text: "Search"
-                            onClicked: runSearch()
+                            onClicked: root.runSearch()
                         }
                         Item {
                             Layout.fillWidth: true
@@ -254,21 +309,111 @@ ShellRoot {
                     color: "#253057"
                 }
 
-                RowLayout {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    visible: root.searchResults.length > 0
-                    spacing: 8
+                    visible: searchData.status !== "idle"
+                    spacing: 6
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.searchStatusText()
+                        color: searchData.status === "error" ? "#E06C75" : "#9CF7C2"
+                        font.family: root.textFont
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
 
                     Repeater {
-                        model: root.searchResults.slice(0, 3)
-                        Button {
-                            Layout.maximumWidth: 260
-                            text: modelData.fullName
-                            font.family: root.textFont
-                            onClicked: {
-                                runRepobar(["pin", modelData.fullName])
-                                repoInput.text = ""
-                                root.searchResults = []
+                        model: root.searchResults.slice(0, 6)
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 74
+                            color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? "#202848" : "#141528"
+                            border.color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? "#85E1FB" : "#253057"
+                            border.width: 1
+                            radius: 4
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.runRepobar(["search", "select", modelData.fullName])
+                            }
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.preferredWidth: 34
+                                    Layout.preferredHeight: 34
+                                    radius: 4
+                                    color: "#0B0C16"
+                                    border.color: "#253057"
+                                    border.width: 1
+                                    clip: true
+
+                                    Image {
+                                        anchors.fill: parent
+                                        anchors.margins: 1
+                                        source: modelData.ownerAvatarUrl || ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
+                                        visible: source.toString().length > 0
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: (modelData.owner || "?").toString().slice(0, 1).toUpperCase()
+                                        color: "#9CF7C2"
+                                        font.family: root.textFont
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        visible: !(modelData.ownerAvatarUrl || "")
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.fullName || ""
+                                        color: "#DDF7FF"
+                                        font.family: root.textFont
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.description || "No description"
+                                        color: "#8FA4D8"
+                                        font.family: root.textFont
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Stars " + ((modelData.stats && modelData.stats.stars) || 0)
+                                        color: "#6A6E95"
+                                        font.family: root.textFont
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Button {
+                                    Layout.preferredWidth: 70
+                                    text: "Open"
+                                    onClicked: root.runRepobar(["open", root.repoUrl(modelData)])
+                                }
+                                Button {
+                                    Layout.preferredWidth: 70
+                                    text: root.isPinned(modelData.fullName) ? "Pinned" : "Pin"
+                                    enabled: !root.isPinned(modelData.fullName)
+                                    onClicked: root.runRepobar(["pin", modelData.fullName])
+                                }
                             }
                         }
                     }
@@ -302,46 +447,46 @@ ShellRoot {
                                     anchors.margins: 10
                                     spacing: 8
 
-	                                    RowLayout {
-	                                        Layout.fillWidth: true
-	                                        Layout.fillHeight: true
-	                                        spacing: 12
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        spacing: 12
 
-	                                        Rectangle {
-	                                            width: 8
-	                                            Layout.fillHeight: true
-	                                            radius: 2
-	                                            color: statusColor(modelData.status)
-	                                        }
+                                        Rectangle {
+                                            width: 8
+                                            Layout.fillHeight: true
+                                            radius: 2
+                                            color: statusColor(modelData.status)
+                                        }
 
-                                            Rectangle {
-                                                Layout.preferredWidth: 42
-                                                Layout.preferredHeight: 42
-                                                radius: 4
-                                                color: "#0B0C16"
-                                                border.color: "#253057"
-                                                border.width: 1
-                                                clip: true
+                                        Rectangle {
+                                            Layout.preferredWidth: 42
+                                            Layout.preferredHeight: 42
+                                            radius: 4
+                                            color: "#0B0C16"
+                                            border.color: "#253057"
+                                            border.width: 1
+                                            clip: true
 
-                                                Image {
-                                                    anchors.fill: parent
-                                                    anchors.margins: 1
-                                                    source: modelData.ownerAvatarUrl || ""
-                                                    fillMode: Image.PreserveAspectCrop
-                                                    asynchronous: true
-                                                    visible: source.toString().length > 0
-                                                }
-
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: (modelData.owner || "?").toString().slice(0, 1).toUpperCase()
-                                                    color: "#9CF7C2"
-                                                    font.family: root.textFont
-                                                    font.pixelSize: 16
-                                                    font.bold: true
-                                                    visible: !(modelData.ownerAvatarUrl || "")
-                                                }
+                                            Image {
+                                                anchors.fill: parent
+                                                anchors.margins: 1
+                                                source: modelData.ownerAvatarUrl || ""
+                                                fillMode: Image.PreserveAspectCrop
+                                                asynchronous: true
+                                                visible: source.toString().length > 0
                                             }
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: (modelData.owner || "?").toString().slice(0, 1).toUpperCase()
+                                                color: "#9CF7C2"
+                                                font.family: root.textFont
+                                                font.pixelSize: 16
+                                                font.bold: true
+                                                visible: !(modelData.ownerAvatarUrl || "")
+                                            }
+                                        }
 
                                         ColumnLayout {
                                             Layout.fillWidth: true
@@ -354,8 +499,8 @@ ShellRoot {
                                                 font.bold: true
                                             }
                                             Text {
-                                                text: modelData.description || ""
-                                                color: "#8FA4D8"
+                                                text: modelData.pending ? "Pending refresh" : (modelData.description || "")
+                                                color: modelData.pending ? "#85E1FB" : "#8FA4D8"
                                                 font.family: root.textFont
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
@@ -388,58 +533,58 @@ ShellRoot {
                                         }
                                     }
 
-	                                    RowLayout {
-	                                        Layout.fillWidth: true
-                                            Layout.preferredHeight: 38
-	                                        spacing: 8
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 38
+                                        spacing: 8
 
-	                                        Text {
-	                                            text: trafficText(modelData)
-	                                            color: "#6A6E95"
-	                                            font.family: root.textFont
-	                                            font.pixelSize: 10
-	                                            Layout.preferredWidth: 150
-	                                            Layout.maximumWidth: 180
-	                                            elide: Text.ElideRight
-	                                        }
-	                                        RowLayout {
-	                                            Layout.fillWidth: true
-	                                            spacing: 2
-	                                            Repeater {
-	                                                model: modelData.heatmap && modelData.heatmap.cells ? modelData.heatmap.cells : []
-	                                                Rectangle {
-	                                                    width: 6
-	                                                    height: 14
-	                                                    radius: 1
-	                                                    color: modelData.intensity >= 4 ? "#50F872" : modelData.intensity === 3 ? "#4FE88F" : modelData.intensity === 2 ? "#82FB9C" : modelData.intensity === 1 ? "#253057" : "#202848"
-	                                                }
-	                                            }
-	                                        }
+                                        Text {
+                                            text: trafficText(modelData)
+                                            color: "#6A6E95"
+                                            font.family: root.textFont
+                                            font.pixelSize: 10
+                                            Layout.preferredWidth: 150
+                                            Layout.maximumWidth: 180
+                                            elide: Text.ElideRight
+                                        }
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 2
+                                            Repeater {
+                                                model: modelData.heatmap && modelData.heatmap.cells ? modelData.heatmap.cells : []
+                                                Rectangle {
+                                                    width: 6
+                                                    height: 14
+                                                    radius: 1
+                                                    color: modelData.intensity >= 4 ? "#50F872" : modelData.intensity === 3 ? "#4FE88F" : modelData.intensity === 2 ? "#82FB9C" : modelData.intensity === 1 ? "#253057" : "#202848"
+                                                }
+                                            }
+                                        }
 
-	                                        Button {
+                                        Button {
                                             Layout.preferredHeight: 30
                                             Layout.preferredWidth: 78
-	                                            text: "Open"
-	                                            onClicked: runRepobar(["open", modelData.url || ("https://github.com/" + modelData.fullName)])
-	                                        }
-	                                        Button {
+                                            text: "Open"
+                                            onClicked: runRepobar(["open", root.repoUrl(modelData)])
+                                        }
+                                        Button {
                                             Layout.preferredHeight: 30
                                             Layout.preferredWidth: 86
-	                                            text: "Refresh"
-	                                            onClicked: runRepobar(["repo", modelData.fullName])
-	                                        }
-	                                        Button {
+                                            text: "Refresh"
+                                            onClicked: runRepobar(["refresh"])
+                                        }
+                                        Button {
                                             Layout.preferredHeight: 30
                                             Layout.preferredWidth: 68
-		                                            text: modelData.pinned ? "Unpin" : "Pin"
-		                                            onClicked: runRepobar([modelData.pinned ? "unpin" : "pin", modelData.fullName])
-	                                        }
-	                                        Button {
+                                            text: modelData.pinned ? "Unpin" : "Pin"
+                                            onClicked: runRepobar([modelData.pinned ? "unpin" : "pin", modelData.fullName])
+                                        }
+                                        Button {
                                             Layout.preferredHeight: 30
                                             Layout.preferredWidth: 72
-	                                            text: "Hide"
-	                                            onClicked: runRepobar(["hide", modelData.fullName])
-	                                        }
+                                            text: "Hide"
+                                            onClicked: runRepobar(["hide", modelData.fullName])
+                                        }
                                     }
                                 }
                             }
