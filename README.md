@@ -76,14 +76,6 @@ pressure and local checkout state from the active provider:
 - Forgejo public repository activity at `http://vigilance:3002`
 - RepoBar-owned JSON API cache and Discrawl-style archive import into SQLite via `sqlite3`
 
-Not in v1:
-
-- macOS Swift/AppKit runtime
-- GitHub App OAuth loopback flow
-- Keychain storage
-- Sparkle/Homebrew packaging
-- terminal or Wofi fallback UI
-
 ## Waybar Behavior
 
 The bar reads cached state only. GitHub fetches happen during `repobar refresh` or in `repobar daemon`.
