@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP_CONFIG="$(mktemp -t repobar-release-check-XXXXXX.json)"
+TMP_FORGEJO_CONFIG="$(mktemp -t repobar-release-check-forgejo-XXXXXX.json)"
+TMP_STATE="$(mktemp -d -t repobar-release-check-state-XXXXXX)"
+TMP_FORGEJO_STATE="$(mktemp -d -t repobar-release-check-forgejo-state-XXXXXX)"
+
+cleanup() {
+  rm -f "$TMP_CONFIG"
+  rm -f "$TMP_FORGEJO_CONFIG"
+  rm -rf "$TMP_STATE"
+  rm -rf "$TMP_FORGEJO_STATE"
+}
+
+run_step() {
+  echo
+  echo "==> $1"
+  shift
+  "$@"
+}
+
+run_archive_import_check() {
+  local archive_dir
+  local db_path
+  archive_dir="$(mktemp -d)"
+  db_path="$archive_dir/archive.sqlite"
+  mkdir -p "$archive_dir/tables/repositories"
+  printf '{"tables":[{"name":"repositories","files":["tables/repositories/000001.jsonl"],"columns":["full_name","stars"]}]}\n' > "$archive_dir/manifest.json"
+  printf '{"full_name":"pvd/fizzy","stars":1}\n' > "$archive_dir/tables/repositories/000001.jsonl"
+  bin/repobar archives add smoke --config "$TMP_FORGEJO_CONFIG" --repo "$archive_dir" --db "$db_path" --json >/dev/null
+  bin/repobar archives update smoke --config "$TMP_FORGEJO_CONFIG" --json >/dev/null
+  test "$(sqlite3 "$db_path" "select stars from repositories where full_name = 'pvd/fizzy';")" = "1"
+  rm -rf "$archive_dir"
+}
+
+set_config_state_dir() {
+  local config_path="$1"
+  local state_dir="$2"
+  ruby -rjson -e '
+    path = ARGV.fetch(0)
+    state_dir = ARGV.fetch(1)
+    config = JSON.parse(File.read(path))
+    config["runtime"] ||= {}
+    config["runtime"]["stateDir"] = state_dir
+    File.write(path, "#{JSON.pretty_generate(config)}\n")
+  ' "$config_path" "$state_dir"
+}
+
+trap cleanup EXIT
+
+cd "$ROOT_DIR"
+
+run_step "ruby syntax" zsh -lc 'ruby -wc bin/repobar $(rg --files lib test)'
+run_step "test suite" ruby -Itest test/run.rb
+run_step "config init" bash -lc "bin/repobar config init --config '$TMP_CONFIG' --format json >/dev/null"
+set_config_state_dir "$TMP_CONFIG" "$TMP_STATE"
+run_step "config validate" bin/repobar config validate --config "$TMP_CONFIG"
+run_step "waybar render" bash -lc "bin/repobar waybar render --config '$TMP_CONFIG' >/dev/null"
+run_step "ui status" bash -lc "bin/repobar ui status --config '$TMP_CONFIG' --format json --pretty >/dev/null"
+run_step "forgejo config" bash -lc "rm -f '$TMP_FORGEJO_CONFIG'; bin/repobar config forgejo --config '$TMP_FORGEJO_CONFIG' >/dev/null"
+set_config_state_dir "$TMP_FORGEJO_CONFIG" "$TMP_FORGEJO_STATE"
+run_step "forgejo auth status" bin/repobar auth status --config "$TMP_FORGEJO_CONFIG"
+run_step "forgejo refresh" bash -lc "bin/repobar refresh --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --limit 3 >/dev/null"
+run_step "forgejo recent lists" bash -lc "bin/repobar pulls pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar ci pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar tags pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar branches pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar commits pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null; bin/repobar activity pvd/fizzy --config '$TMP_FORGEJO_CONFIG' --limit 2 >/dev/null"
+run_step "settings surface" bash -lc "bin/repobar pin pvd/fizzy --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings set repo-limit 4 --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings show --config '$TMP_FORGEJO_CONFIG' --json >/dev/null"
+run_step "repo filters" bash -lc "bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --scope pinned --limit 2 >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --filter work --limit 2 >/dev/null; bin/repobar repos --config '$TMP_FORGEJO_CONFIG' --forks --archived --age 365 --limit 2 >/dev/null; bin/repobar settings set show-contribution-header false --config '$TMP_FORGEJO_CONFIG' >/dev/null; bin/repobar settings set heatmap-span 12m --config '$TMP_FORGEJO_CONFIG' >/dev/null"
+run_step "repo search" bash -lc "bin/repobar search fizzy --config '$TMP_FORGEJO_CONFIG' --json | ruby -rjson -e 'exit(JSON.parse(STDIN.read).any? ? 0 : 1)'"
+run_step "cache surface" bash -lc "bin/repobar cache status --config '$TMP_FORGEJO_CONFIG' --json >/dev/null; bin/repobar rate-limits --config '$TMP_FORGEJO_CONFIG' --json >/dev/null"
+run_step "archive import" run_archive_import_check
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  run_step "auth status" bin/repobar auth status --config "$TMP_CONFIG"
+else
+  echo
+  echo "==> auth status skipped (gh is not authenticated)"
+fi
+
+if command -v quickshell >/dev/null 2>&1; then
+  echo
+  echo "==> quickshell load"
+  set +e
+  env \
+    QT_QPA_PLATFORM=wayland \
+    REPOBAR_BIN="$ROOT_DIR/bin/repobar" \
+    REPOBAR_CONFIG="$TMP_CONFIG" \
+    REPOBAR_STATE_DIR="$TMP_STATE" \
+    timeout 8s quickshell --path "$ROOT_DIR/frontend/quickshell/shell.qml" >/dev/null
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
+    echo "QuickShell load failed with exit code $status" >&2
+    exit "$status"
+  fi
+fi
+
+echo
+echo "release-check passed"
