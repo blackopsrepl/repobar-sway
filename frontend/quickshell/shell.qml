@@ -67,14 +67,14 @@ ShellRoot {
         searchFile.reload()
     }
 
-    function trafficText(repo) {
+    function heatmapText(repo) {
         if (repo.pending) {
             return "Refreshing..."
         }
-        if (!repo.traffic) {
-            return "Traffic unavailable"
+        if (!repo.heatmap) {
+            return "Activity heatmap"
         }
-        return "Views " + (repo.traffic.uniqueViews || 0) + " unique  Clones " + (repo.traffic.uniqueClones || 0) + " unique"
+        return "Activity " + (repo.heatmap.total || 0) + " commits"
     }
 
     function providerActive(provider) {
@@ -539,7 +539,7 @@ ShellRoot {
                                         spacing: 8
 
                                         Text {
-                                            text: trafficText(modelData)
+                                            text: heatmapText(modelData)
                                             color: "#6A6E95"
                                             font.family: root.textFont
                                             font.pixelSize: 10

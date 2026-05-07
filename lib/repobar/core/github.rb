@@ -311,11 +311,7 @@ module RepoBar
       end
 
       def heatmap(config, token, owner, name)
-        cells = if forgejo?(config)
-                  forgejo_heatmap(config, token, owner, name)
-                else
-                  github_heatmap(config, token, owner, name)
-                end
+        cells = activity_heatmap(config, token, owner, name)
         total = cells.sum { |cell| cell[:count].to_i }
         max = cells.map { |cell| cell[:count].to_i }.max.to_i
         { total: total, max: max, cells: cells }
@@ -323,19 +319,7 @@ module RepoBar
         { total: 0, max: 0, cells: [] }
       end
 
-      def github_heatmap(config, token, owner, name)
-        return [] if token.to_s.empty?
-
-        response = request(config, "/repos/#{owner}/#{name}/stats/commit_activity", token: token)
-        Array(response.data).flat_map do |week|
-          week_start = Time.at((week[:week] || week["week"]).to_i).utc.to_date
-          Array(week[:days] || week["days"]).each_with_index.map do |count, index|
-            { date: (week_start + index).iso8601, count: count.to_i }
-          end
-        end.last(182)
-      end
-
-      def forgejo_heatmap(config, token, owner, name)
+      def activity_heatmap(config, token, owner, name)
         counts = Hash.new(0)
         commits(config, token, owner, name, 100).each do |commit|
           date = Core::Format.parse_time(commit[:date])&.utc&.to_date&.iso8601

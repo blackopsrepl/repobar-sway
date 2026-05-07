@@ -39,6 +39,26 @@ class ForgejoTest < Minitest::Test
     assert_nil RepoBar::Core::GitHub.access_token(config)
   end
 
+  def test_github_heatmap_uses_recent_commit_activity
+    config = build_config
+    today = Date.today.iso8601
+    yesterday = (Date.today - 1).iso8601
+    commits = [
+      { date: "#{today}T08:00:00Z" },
+      { date: "#{today}T10:00:00Z" },
+      { date: "#{yesterday}T10:00:00Z" }
+    ]
+
+    RepoBar::Core::GitHub.stub(:commits, commits) do
+      heatmap = RepoBar::Core::GitHub.heatmap(config, "token", "openclaw", "openclaw")
+      counts = heatmap[:cells].to_h { |cell| [cell[:date], cell[:count]] }
+
+      assert_equal 3, heatmap[:total]
+      assert_equal 2, counts[today]
+      assert_equal 1, counts[yesterday]
+    end
+  end
+
   def test_fresh_rest_cache_short_circuits_network
     config = build_config
     uri = URI("https://api.github.com/repos/openclaw/openclaw")
