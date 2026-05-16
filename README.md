@@ -6,13 +6,20 @@
 
 RepoBar Linux is a SolverForge Linux companion for watching GitHub.com and local Forgejo repository pressure from Waybar. It keeps the product idea from [steipete](https://github.com/steipete)'s original [RepoBar](https://github.com/steipete/RepoBar), but the implementation is native to this desktop stack: Ruby backend, cached JSON state, a resident action daemon, a compact Waybar chip, and one QuickShell panel.
 
-## Screenshot
+## Screenshots
 
-![RepoBar Linux QuickShell panel showing repository pressure, account activity, repo cards, and pinned repo controls](docs/assets/repobar-panel-screenshot.png)
+### Centered QuickShell Modal
+
+![RepoBar Linux QuickShell modal centered vertically with repository pressure, account activity, repo cards, and pinned repo controls](docs/assets/repobar-panel-screenshot.png)
+
+### Pinned Repo Reordering
+
+![RepoBar Linux pinned repository card controls with the drag handle and compact icon actions](docs/assets/repobar-pinned-reorder-screenshot.png)
 
 ## Current Shape
 
 - CLI entrypoint: `bin/repobar`
+- Current release: `v1.0.0`
 - Backend code: `lib/repobar/core`
 - Runtime code: `lib/repobar/runtime`
 - Human UI: `frontend/quickshell/shell.qml`
@@ -29,14 +36,16 @@ RepoBar has one product UI: QuickShell. Waybar is only a launcher and cached-sta
 - Repository cards with avatar, description, CI state, open PRs, open issues, stars, last push, release/activity summary, local branch state, dirty count, and activity heatmap.
 - A reader panel for cached PR and issue previews, including body excerpts, authors, update age, labels, draft state, and links.
 - Search results that can be opened or pinned without a full refresh round trip.
-- Icon controls for open, read, refresh, pin/unpin, and hide. Pinned repos are projected into cached state immediately and later hydrated by the daemon.
+- Icon controls for open, read, refresh, pin/unpin, and hide, plus a drag handle on pinned repo cards. Pinned repos are uncapped, preserve the configured order, project into cached state immediately, and are later hydrated by the daemon.
 - Waybar classes for `healthy`, `loading`, `stale`, `error`, `has-work`, `has-ci-failures`, `local-dirty`, and `rate-limited`.
 
 ## Runtime Flow
 
-`repobar daemon` owns effects and state transitions. CLI commands and QuickShell actions dispatch to the daemon over `daemon.sock`; the daemon performs refreshes, search jobs, provider switches, pin/unpin/hide/show mutations, and state projection.
+`repobar daemon` owns effects and state transitions. CLI commands and QuickShell actions dispatch to the daemon over `daemon.sock`; the daemon performs refreshes, search jobs, provider switches, pin/unpin/hide/show mutations, pinned repo moves, and state projection.
 
-Provider switches are cache-first. `repobar provider github|forgejo` saves the current provider snapshot, rewrites config, resets search state, restores the target provider snapshot immediately when one exists, then asks the daemon for a background refresh. Refresh requests are coalesced: one refresh may run and one follow-up may be pending, but repeated UI actions do not stack unbounded refresh threads. If a refresh started under an older provider/config identity finishes after the user has switched providers, it updates only that provider's saved cache and cannot overwrite the active `snapshot.json`.
+Provider switches are cache-first. `repobar provider github|forgejo` saves the current provider snapshot, rewrites config, resets search state, restores the target provider snapshot immediately when one exists, then asks the daemon for a background refresh. Refresh requests are coalesced: one refresh may run and one follow-up may be pending, but repeated UI actions do not stack unbounded refresh threads. Timer ticks skip queuing a pending follow-up while a refresh is already alive. If a refresh started under an older provider/config identity finishes after the user has switched providers, it updates only that provider's saved cache and cannot overwrite the active `snapshot.json`; if the identity change is same-provider visibility/order state, the provider cache is re-projected through the newer pinned/hidden config before it is saved.
+
+`repoList.displayLimit` caps only unpinned repository extras. Every configured pinned repository is selected ahead of that limit, ordered by `repoList.pinnedRepositories`, and can be reordered with either the QuickShell drag handle or `repobar pin move`.
 
 Refresh writes:
 
@@ -116,6 +125,7 @@ bin/repobar checkout openclaw/openclaw
 bin/repobar checkout openclaw/openclaw --destination ~/hack/openclaw
 bin/repobar checkout openclaw/openclaw --open
 bin/repobar pin openclaw/openclaw
+bin/repobar pin move openclaw/openclaw 0
 bin/repobar unpin openclaw/openclaw
 bin/repobar hide openclaw/openclaw
 bin/repobar show openclaw/openclaw
