@@ -4,29 +4,78 @@
   <img src="docs/assets/repobar-mascot.png" alt="RepoBar Linux mascot" width="240">
 </p>
 
-Linux-first RepoBar implementation for SolverForge Linux and Waybar, built in Ruby with a QuickShell frontend.
-
-This repository is inspired by [steipete](https://github.com/steipete)'s original [RepoBar](https://github.com/steipete/RepoBar). It keeps the repository-pressure product idea, but implements a native Linux surface with a cached Ruby backend, a thin Waybar chip, and one QuickShell popover.
+RepoBar Linux is a SolverForge Linux companion for watching GitHub.com and local Forgejo repository pressure from Waybar. It keeps the product idea from [steipete](https://github.com/steipete)'s original [RepoBar](https://github.com/steipete/RepoBar), but the implementation is native to this desktop stack: Ruby backend, cached JSON state, a resident action daemon, a compact Waybar chip, and one QuickShell panel.
 
 ## Screenshot
 
-![RepoBar Linux QuickShell panel showing GitHub repositories, CI, issues, releases, and pinned repo actions](docs/assets/repobar-panel-screenshot.png)
+![RepoBar Linux QuickShell panel showing repository pressure, account activity, repo cards, and pinned repo controls](docs/assets/repobar-panel-screenshot.png)
 
-## Runtime
+## Current Shape
 
-- Ruby CLI in `bin/repobar`
-- GitHub auth through the existing `gh` token
-- local Forgejo support through `http://vigilance:3002/api/v1`
-- Cached state in `~/.local/state/repobar/`
-- Config in `~/.repobar/config.json`
-- Resident refresh loop via `repobar daemon`
-- Waybar renderer via `repobar waybar render`
-- QuickShell frontend at `frontend/quickshell/shell.qml`
+- CLI entrypoint: `bin/repobar`
+- Backend code: `lib/repobar/core`
+- Runtime code: `lib/repobar/runtime`
+- Human UI: `frontend/quickshell/shell.qml`
+- Config: `~/.repobar/config.json`
+- Runtime state: `~/.local/state/repobar/`
+- Local release gate: `bin/release-check`
+
+RepoBar has one product UI: QuickShell. Waybar is only a launcher and cached-state renderer. The QuickShell panel reads `snapshot.json`, `ui.json`, `search.json`, and `state-event.json`; it never calls GitHub.com, Forgejo, or `git` directly.
+
+## What It Shows
+
+- Active provider, account, repository count, PR count, issue count, and stale/loading state.
+- GitHub or Forgejo account activity heatmap when `settings.showContributionHeader` is enabled.
+- Repository cards with avatar, description, CI state, open PRs, open issues, stars, last push, release/activity summary, local branch state, dirty count, and activity heatmap.
+- A reader panel for cached PR and issue previews, including body excerpts, authors, update age, labels, draft state, and links.
+- Search results that can be opened or pinned without a full refresh round trip.
+- Icon controls for open, read, refresh, pin/unpin, and hide. Pinned repos are projected into cached state immediately and later hydrated by the daemon.
+- Waybar classes for `healthy`, `loading`, `stale`, `error`, `has-work`, `has-ci-failures`, `local-dirty`, and `rate-limited`.
+
+## Runtime Flow
+
+`repobar daemon` owns effects and state transitions. CLI commands and QuickShell actions dispatch to the daemon over `daemon.sock`; the daemon performs refreshes, search jobs, provider switches, pin/unpin/hide/show mutations, and state projection.
+
+Refresh writes:
+
+- `snapshot.json`: raw repositories, local checkouts, account data, and presenter-ready `view`.
+- `providers/github.json` and `providers/forgejo.json`: provider-specific snapshot caches used for instant provider switching.
+- `state-event.json`: stable watched file that tells QuickShell to reload state.
+
+UI commands write:
+
+- `ui.json`: panel open/closed state and focus request.
+- `search.json`: async search status, query, selection, results, errors, and timestamp.
+
+Network cache files live under `~/.local/state/repobar/cache/`:
+
+- `rest.json`
+- `graphql.json`
+- `rate_limits.json`
+
+## Providers
+
+GitHub.com is the default provider and uses `gh auth token`, `REPOBAR_GITHUB_TOKEN`, or `GITHUB_TOKEN`.
+
+Forgejo mode targets `http://vigilance:3002/api/v1`. Public reads work without a token; private reads can use `REPOBAR_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, or `GITEA_TOKEN`. Forgejo account heatmaps use `REPOBAR_FORGEJO_LOGIN` when the public login is `forgejo:public`, then fall back to `$USER`.
+
+## Desktop Autostart
+
+RepoBar has two separate runtime pieces:
+
+- `repobar daemon --config ~/.repobar/config.json` refreshes repository state, serves actions, and writes cached snapshots.
+- `repobar waybar render --config ~/.repobar/config.json` reads cached state and returns Waybar JSON.
+
+Waybar does not fetch GitHub, Forgejo, or local repository state by itself. If the daemon is not running after login or reboot, the Waybar chip can still render stale cached state. A desktop integration should start and supervise the daemon at session startup.
+
+On SolverForge Linux, the managed Waybar integration starts companion daemons through `solverforge-waybar-companions-start`, launched from Sway `exec_always` beside Waybar. Edit that managed default layer, not symlinked files under `~/.config/waybar`.
 
 ## Commands
 
 ```bash
 bin/repobar auth status
+bin/repobar login
+bin/repobar logout
 bin/repobar config init
 bin/repobar config github
 bin/repobar config forgejo
@@ -35,63 +84,74 @@ bin/repobar provider github
 bin/repobar provider forgejo
 bin/repobar refresh
 bin/repobar daemon
-bin/repobar repos
+bin/repobar daemon --once
+bin/repobar repos --filter work --sort prs
 bin/repobar search fizzy
+bin/repobar search select pvd/fizzy
 bin/repobar repo openclaw/openclaw
 bin/repobar issues openclaw/openclaw
 bin/repobar pulls openclaw/openclaw
 bin/repobar releases openclaw/openclaw
 bin/repobar ci openclaw/openclaw
+bin/repobar discussions openclaw/openclaw
 bin/repobar tags openclaw/openclaw
 bin/repobar branches openclaw/openclaw
 bin/repobar contributors openclaw/openclaw
 bin/repobar commits openclaw/openclaw
 bin/repobar activity openclaw/openclaw
+bin/repobar contributions blackopsrepl
 bin/repobar local
 bin/repobar local sync openclaw/openclaw
+bin/repobar local rebase openclaw/openclaw
+bin/repobar local branches openclaw/openclaw
 bin/repobar worktrees openclaw/openclaw
+bin/repobar checkout openclaw/openclaw
 bin/repobar pin openclaw/openclaw
+bin/repobar unpin openclaw/openclaw
+bin/repobar hide openclaw/openclaw
+bin/repobar show openclaw/openclaw
 bin/repobar settings show
+bin/repobar settings set repo-limit 8
 bin/repobar cache status
+bin/repobar cache clear
+bin/repobar rate-limits
+bin/repobar archives list
+bin/repobar changelog README.md
+bin/repobar markdown README.md
+bin/repobar open https://github.com/openclaw/openclaw
+bin/repobar open finder openclaw/openclaw
+bin/repobar open terminal openclaw/openclaw
 bin/repobar panel
+bin/repobar ui open
+bin/repobar ui close
+bin/repobar ui toggle
 bin/repobar ui status --format json --pretty
 bin/repobar waybar render
+bin/repobar waybar refresh
+bin/repobar waybar panel
 bin/release-check
 ```
 
-## Product Scope
+See [docs/cli.md](docs/cli.md) for the full CLI surface and flags.
 
-RepoBar defaults to GitHub.com, where real user issues and pull requests live,
-and can switch to the local Forgejo instance when needed. It shows repository
-pressure and local checkout state from the active provider:
+## Verification
 
-- open issues and pull requests
-- stars and forks
-- latest pushed activity
-- latest release
-- latest Actions run status
-- recent activity summary
-- matched local branch, dirty files, and ahead/behind state
-- GitHub rate-limit health
-- Forgejo public repository activity at `http://vigilance:3002`
-- RepoBar-owned JSON API cache and Discrawl-style archive import into SQLite via `sqlite3`
+```bash
+ruby -wc $(rg --files bin lib test)
+ruby -Itest test/run.rb
+qmllint frontend/quickshell/shell.qml
+bin/repobar config validate
+bin/repobar waybar render
+bin/repobar ui status --format json --pretty
+bin/release-check
+```
 
-## Waybar Behavior
+QuickShell smoke:
 
-The bar reads cached state only. GitHub fetches happen during `repobar refresh` or in `repobar daemon`.
-The Waybar chip starts with `GH` or `FJ` to show the active provider.
-
-- Left click: open the QuickShell popover
-- Middle click: refresh now
-- Right click: open the QuickShell popover
-
-The chip carries state classes for CSS:
-
-- `healthy`
-- `loading`
-- `stale`
-- `error`
-- `has-work`
-- `has-ci-failures`
-- `local-dirty`
-- `rate-limited`
+```bash
+env QT_QPA_PLATFORM=wayland \
+  REPOBAR_BIN=$PWD/bin/repobar \
+  REPOBAR_CONFIG=$HOME/.repobar/config.json \
+  REPOBAR_STATE_DIR=$HOME/.local/state/repobar \
+  quickshell --path $PWD/frontend/quickshell/shell.qml
+```
