@@ -45,13 +45,14 @@ All runtime files default to `~/.local/state/repobar/`.
 2. `Runtime::State.with_refresh_lock` serializes refresh work.
 3. `Core::GitHub.auth_status` checks GitHub auth or Forgejo public/private access.
 4. If authenticated and `settings.showContributionHeader` is enabled, `Core::GitHub.account_heatmap` fetches the account activity calendar.
-5. `Core::GitHub.fetch_repositories` loads pinned/visible repositories or recent user repositories, filters hidden/fork/archive rows, sorts them, and hydrates selected rows.
+5. `Core::GitHub.fetch_repositories` loads all pinned repositories first, then visible/recent user repositories up to `repoList.displayLimit`, filters hidden/fork/archive rows, sorts them, and hydrates selected rows. The limit applies only to unpinned extras.
 6. Hydration adds open issue/PR counts, issue/PR preview items, latest release, CI status, recent activity, traffic where available, and per-repo activity heatmap.
 7. `Core::LocalGit.scan` scans configured roots and `Core::LocalGit.match_repositories` attaches local branch/dirty/ahead/behind state.
 8. `Runtime::Presenter.build_snapshot_view` creates summary, chip, account heatmap, repo views, and local repo views.
 9. If the provider/config identity still matches the refresh start identity, `Runtime::State.write_snapshot` writes `snapshot.json`, writes the active provider snapshot, and updates `state-event.json`.
-10. If the user switched provider or changed the refresh identity while the refresh was running, the completed refresh writes only the original provider snapshot under `providers/` and does not replace active UI state.
-11. `Runtime::Store.signal_waybar` sends the configured RTMIN signal to Waybar.
+10. If the user switched provider while the refresh was running, the completed refresh writes only the original provider snapshot under `providers/` and does not replace active UI state.
+11. If the user changed same-provider visibility or pinned order while the refresh was running, the completed refresh re-projects the refreshed rows through the newer pinned/hidden config before writing the provider cache.
+12. `Runtime::Store.signal_waybar` sends the configured RTMIN signal to Waybar.
 
 ## Action Flow
 
@@ -59,7 +60,8 @@ All runtime files default to `~/.local/state/repobar/`.
 2. `Runtime::Daemon.ensure_running` starts `repobar daemon` if no action socket is ready.
 3. The daemon handles actions on `daemon.sock` and returns JSON results.
 4. Actions that change provider or repo visibility request a daemon refresh.
-5. Refresh requests are coalesced: while one refresh is running, additional requests mark one pending follow-up instead of spawning unbounded refresh threads.
+5. Action-triggered refresh requests are coalesced: while one refresh is running, additional action requests mark one pending follow-up instead of spawning unbounded refresh threads.
+6. Scheduled timer refresh requests skip queuing pending follow-ups while a refresh is already alive, so slow network refreshes do not collapse into back-to-back timer refreshes.
 
 Daemon-owned actions:
 
@@ -68,6 +70,7 @@ Daemon-owned actions:
 - `set_provider`
 - `pin`
 - `unpin`
+- `pin_move`
 - `hide`
 - `show`
 - `search_start`
@@ -84,6 +87,14 @@ Daemon-owned actions:
 6. If not, a blank provider projection is written while a coalesced async refresh is requested.
 7. Refreshes that started before the switch cannot overwrite the newly active provider view; they can only update the provider snapshot for the identity they started with.
 
+## Pinned Repo Flow
+
+1. `repobar pin owner/name` normalizes the full name, removes it from hidden repos, appends it to `repoList.pinnedRepositories` if missing, projects the current snapshot immediately, and requests a coalesced refresh.
+2. `repobar unpin owner/name` removes the full name from `repoList.pinnedRepositories`, projects the current snapshot immediately, and requests a coalesced refresh.
+3. `repobar pin move owner/name POSITION` moves an existing pinned repo to the zero-based non-negative position, clamps positions beyond the end to the last valid slot, saves config, and projects the new order without forcing a network refresh.
+4. In QuickShell, pinned repo cards show a drag handle. Dropping one pinned card onto another dispatches `repobar pin move` with the dropped card's target index.
+5. Pinned repositories are not capped by `repoList.displayLimit`; the limit applies only to unpinned extras after all pins have been selected.
+
 ## Search Flow
 
 1. QuickShell text input calls `repobar search <query> --limit 8`.
@@ -96,7 +107,14 @@ Daemon-owned actions:
 
 ## QuickShell Layout
 
-Panel:
+Modal overlay:
+
+1. The QuickShell surface is a transparent full-screen `PanelWindow`.
+2. The dim overlay covers the screen without claiming Waybar layout space.
+3. The modal frame is centered vertically and horizontally relative to the screen.
+4. The frame uses nearly the full screen height with small vertical margins, giving the account heatmap, reader, and repo list more vertical room.
+
+Panel content:
 
 1. Header with title, active account, repository/work counts, provider switch buttons, refresh, and close.
 2. Optional account activity heatmap with summary stats.
@@ -110,7 +128,7 @@ Repo cards:
 2. Owner avatar or fallback initial.
 3. Repository name, description, CI/PR/issue/star/update line, local checkout line, release/activity line.
 4. Activity heatmap text plus clipped heatmap track.
-5. Icon action strip: open, read, refresh, pin/unpin, hide.
+5. Icon action strip: drag handle when pinned, open, read, refresh, pin/unpin, hide.
 
 Search results:
 

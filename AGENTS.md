@@ -27,20 +27,22 @@
 - QuickShell is the only product UI. Waybar is a cached-state chip and launcher.
 - Keep hosted-repository fetching in `lib/repobar/core/github.rb`; UI code must not call GitHub.com or Forgejo directly.
 - Keep local checkout scanning in `lib/repobar/core/local_git.rb`; UI code must not run `git`.
-- Keep runtime actions daemon-owned. CLI and QuickShell dispatch actions; `Runtime::Daemon` and `Runtime::Store` own refresh, search, provider switching, pin/unpin/hide/show, and projection.
+- Keep runtime actions daemon-owned. CLI and QuickShell dispatch actions; `Runtime::Daemon` and `Runtime::Store` own refresh, search, provider switching, pin/unpin/hide/show, pinned repo moves, and projection.
 - Keep QuickShell presentation backed by `snapshot.json`, `ui.json`, `search.json`, and `state-event.json`.
 - Waybar must remain a cached-state renderer, not a fetch path.
 - Provider switching must preserve provider-specific cached snapshots under `providers/github.json` and `providers/forgejo.json`, restore the target snapshot synchronously when available, and keep switching independent of network latency.
 - Refresh results must not overwrite the active provider snapshot if the refresh started under an older provider/config identity. Late refreshes should update only their original provider cache.
-- Daemon-triggered refresh requests should coalesce through the runtime daemon instead of spawning one refresh thread per UI action.
+- Same-provider stale refreshes must preserve newer pinned/hidden visibility state before writing provider caches, including pinned repo order changes made while the refresh was in flight.
+- Daemon-triggered refresh requests should coalesce through the runtime daemon instead of spawning one refresh thread per UI action. Scheduled timer ticks should not queue pending action refreshes while a refresh is already running.
 - Search must remain an async state transaction through `search.json`; do not make QuickShell block on network search.
 
 ## UI Rules
 
 - Edit `frontend/quickshell/shell.qml` for the human UI.
-- Keep repo action controls compact and icon-led. Current repo-card actions are open, read, refresh, pin/unpin, and hide.
+- Keep the modal overlay screen-centered vertically and horizontally, with enough height for the account heatmap, reader, and multiple repo cards.
+- Keep repo action controls compact and icon-led. Current repo-card controls are pinned drag handle, open, read, refresh, pin/unpin, and hide.
 - Preserve the bounded layout: repo heatmaps may clip inside their track, but controls must not push outside the panel bounds.
-- Keep account heatmaps, repo heatmaps, issue/PR reader data, and pinned state driven by presenter output, not ad hoc UI fetches.
+- Keep account heatmaps, repo heatmaps, issue/PR reader data, pinned state, and pinned order driven by presenter/config output, not ad hoc UI fetches.
 - Use tooltips and accessible names for icon-only controls.
 
 ## Testing

@@ -77,11 +77,14 @@ Search is daemon-owned and async. `search query` writes `search.json` as `loadin
 ## Repo Visibility
 
 - `repobar pin owner/name`
+- `repobar pin move owner/name POSITION`
 - `repobar unpin owner/name`
 - `repobar hide owner/name`
 - `repobar show owner/name`
 
-Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRepositories` through the daemon. They project cached state immediately and request a coalesced async refresh. Pinning a search result inserts a pending row until the next refresh hydrates it.
+Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRepositories` through the daemon. They project cached state immediately and request a coalesced async refresh. Pinning a search result inserts a pending row until the next refresh hydrates it. Pinned repositories are uncapped by `repoList.displayLimit`; the limit applies only to unpinned extras after all pins are selected.
+
+`repobar pin move owner/name POSITION` reorders an existing pinned repository to a zero-based non-negative position, clamps positions beyond the end to the last valid slot, updates cached projection immediately, and does not force a network refresh.
 
 ## Local Git
 
