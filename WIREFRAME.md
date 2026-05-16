@@ -14,7 +14,7 @@ No UI layer fetches hosted repository data directly. GitHub.com and Forgejo call
 4. `lib/repobar/core/cache.rb` stores REST responses, GraphQL responses, and rate-limit observations.
 5. `lib/repobar/core/github.rb` fetches GitHub.com and Forgejo repository/account data.
 6. `lib/repobar/core/local_git.rb` scans local checkouts and maps them to hosted repos.
-7. `lib/repobar/runtime/daemon.rb` owns the action socket, refresh loop, search jobs, and async effects.
+7. `lib/repobar/runtime/daemon.rb` owns the action socket, refresh loop, refresh request coalescing, search jobs, and async effects.
 8. `lib/repobar/runtime/store.rb` mutates runtime/config state for provider switches, visibility changes, search state, and projections.
 9. `lib/repobar/runtime/state.rb` reads and writes cached JSON state.
 10. `lib/repobar/runtime/presenter.rb` converts raw data into UI-ready `view` state.
@@ -49,15 +49,17 @@ All runtime files default to `~/.local/state/repobar/`.
 6. Hydration adds open issue/PR counts, issue/PR preview items, latest release, CI status, recent activity, traffic where available, and per-repo activity heatmap.
 7. `Core::LocalGit.scan` scans configured roots and `Core::LocalGit.match_repositories` attaches local branch/dirty/ahead/behind state.
 8. `Runtime::Presenter.build_snapshot_view` creates summary, chip, account heatmap, repo views, and local repo views.
-9. `Runtime::State.write_snapshot` writes `snapshot.json`, writes the active provider snapshot, and updates `state-event.json`.
-10. `Runtime::Store.signal_waybar` sends the configured RTMIN signal to Waybar.
+9. If the provider/config identity still matches the refresh start identity, `Runtime::State.write_snapshot` writes `snapshot.json`, writes the active provider snapshot, and updates `state-event.json`.
+10. If the user switched provider or changed the refresh identity while the refresh was running, the completed refresh writes only the original provider snapshot under `providers/` and does not replace active UI state.
+11. `Runtime::Store.signal_waybar` sends the configured RTMIN signal to Waybar.
 
 ## Action Flow
 
 1. CLI commands and QuickShell call `Runtime::Daemon.dispatch_action`.
 2. `Runtime::Daemon.ensure_running` starts `repobar daemon` if no action socket is ready.
 3. The daemon handles actions on `daemon.sock` and returns JSON results.
-4. Actions that change provider or repo visibility also start an async refresh thread.
+4. Actions that change provider or repo visibility request a daemon refresh.
+5. Refresh requests are coalesced: while one refresh is running, additional requests mark one pending follow-up instead of spawning unbounded refresh threads.
 
 Daemon-owned actions:
 
@@ -79,7 +81,8 @@ Daemon-owned actions:
 3. Config is rewritten with provider host, API host, and auth source.
 4. `search.json` is reset.
 5. If the target provider has a cached provider snapshot, that snapshot is projected immediately.
-6. If not, a blank provider projection is written while async refresh starts.
+6. If not, a blank provider projection is written while a coalesced async refresh is requested.
+7. Refreshes that started before the switch cannot overwrite the newly active provider view; they can only update the provider snapshot for the identity they started with.
 
 ## Search Flow
 

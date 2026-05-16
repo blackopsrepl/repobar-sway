@@ -27,7 +27,7 @@ GitHub.com is the default provider. It uses `gh auth token`, `REPOBAR_GITHUB_TOK
 
 Forgejo mode targets `http://vigilance:3002/api/v1` by default. Public repositories work without a token; private repositories can use `REPOBAR_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, or `GITEA_TOKEN`.
 
-`repobar provider github|forgejo` switches the active provider, resets search state, restores a provider-specific cached snapshot when available, and starts an async refresh.
+`repobar provider github|forgejo` switches the active provider, resets search state, restores a provider-specific cached snapshot when available, and requests a daemon refresh. The visible switch is cache-first and should not wait for network data. If an older refresh finishes after the switch, it updates only its original provider cache instead of replacing the active snapshot.
 
 ## Repository Lists
 
@@ -81,7 +81,7 @@ Search is daemon-owned and async. `search query` writes `search.json` as `loadin
 - `repobar hide owner/name`
 - `repobar show owner/name`
 
-Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRepositories` through the daemon. They project cached state immediately and start an async refresh. Pinning a search result inserts a pending row until the next refresh hydrates it.
+Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRepositories` through the daemon. They project cached state immediately and request a coalesced async refresh. Pinning a search result inserts a pending row until the next refresh hydrates it.
 
 ## Local Git
 
@@ -119,7 +119,7 @@ Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRep
 - `repobar waybar open`
 - `repobar open URL`
 
-`waybar render` reads cached state only. `waybar refresh` calls the daemon refresh path. `panel`, `ui open`, and `waybar panel` open the QuickShell panel.
+`waybar render` reads cached state only. `waybar refresh` calls the daemon refresh path. Daemon-triggered refresh requests are coalesced so repeated UI actions can leave one active refresh and one pending follow-up, not one thread per click. `panel`, `ui open`, and `waybar panel` open the QuickShell panel.
 
 ## Settings
 

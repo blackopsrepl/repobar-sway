@@ -36,6 +36,8 @@ RepoBar has one product UI: QuickShell. Waybar is only a launcher and cached-sta
 
 `repobar daemon` owns effects and state transitions. CLI commands and QuickShell actions dispatch to the daemon over `daemon.sock`; the daemon performs refreshes, search jobs, provider switches, pin/unpin/hide/show mutations, and state projection.
 
+Provider switches are cache-first. `repobar provider github|forgejo` saves the current provider snapshot, rewrites config, resets search state, restores the target provider snapshot immediately when one exists, then asks the daemon for a background refresh. Refresh requests are coalesced: one refresh may run and one follow-up may be pending, but repeated UI actions do not stack unbounded refresh threads. If a refresh started under an older provider/config identity finishes after the user has switched providers, it updates only that provider's saved cache and cannot overwrite the active `snapshot.json`.
+
 Refresh writes:
 
 - `snapshot.json`: raw repositories, local checkouts, account data, and presenter-ready `view`.
@@ -74,6 +76,7 @@ On SolverForge Linux, the managed Waybar integration starts companion daemons th
 
 ```bash
 bin/repobar auth status
+bin/repobar status
 bin/repobar login
 bin/repobar logout
 bin/repobar config init
@@ -86,6 +89,8 @@ bin/repobar refresh
 bin/repobar daemon
 bin/repobar daemon --once
 bin/repobar repos --filter work --sort prs
+bin/repobar repos --scope pinned
+bin/repobar repos --scope hidden
 bin/repobar search fizzy
 bin/repobar search select pvd/fizzy
 bin/repobar repo openclaw/openclaw
@@ -101,11 +106,15 @@ bin/repobar commits openclaw/openclaw
 bin/repobar activity openclaw/openclaw
 bin/repobar contributions blackopsrepl
 bin/repobar local
+bin/repobar local --root /srv/lab/tools --depth 2
 bin/repobar local sync openclaw/openclaw
 bin/repobar local rebase openclaw/openclaw
 bin/repobar local branches openclaw/openclaw
+bin/repobar local reset openclaw/openclaw --yes
 bin/repobar worktrees openclaw/openclaw
 bin/repobar checkout openclaw/openclaw
+bin/repobar checkout openclaw/openclaw --destination ~/hack/openclaw
+bin/repobar checkout openclaw/openclaw --open
 bin/repobar pin openclaw/openclaw
 bin/repobar unpin openclaw/openclaw
 bin/repobar hide openclaw/openclaw
@@ -129,6 +138,7 @@ bin/repobar ui status --format json --pretty
 bin/repobar waybar render
 bin/repobar waybar refresh
 bin/repobar waybar panel
+bin/repobar waybar open
 bin/release-check
 ```
 

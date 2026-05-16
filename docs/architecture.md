@@ -14,7 +14,9 @@ The hosted-repository boundary lives in `lib/repobar/core/github.rb`; despite th
 
 The local checkout boundary lives in `lib/repobar/core/local_git.rb`. It scans configured roots, resolves repo targets, reports branch/dirty/ahead/behind state, and performs explicit sync/rebase/reset/clone operations.
 
-The runtime boundary lives in `lib/repobar/runtime/daemon.rb`, `store.rb`, and `state.rb`. The daemon owns the action socket, refresh loop, async search jobs, provider switches, visibility mutations, and state projection.
+The runtime boundary lives in `lib/repobar/runtime/daemon.rb`, `store.rb`, and `state.rb`. The daemon owns the action socket, refresh loop, refresh request coalescing, async search jobs, provider switches, visibility mutations, and state projection.
+
+Provider switching is cache-first. `Runtime::Store.set_provider` preserves the current provider snapshot, rewrites config, resets search state, restores a cached target-provider snapshot when one exists, and then asks the daemon for a background refresh. `Runtime::Store.refresh_effect` records the provider/config identity it started with; if that identity changed before the refresh finishes, the result updates only the original provider cache and does not replace active UI state.
 
 The presentation boundary lives in `lib/repobar/runtime/presenter.rb`. It converts raw snapshots into summary state, Waybar chip state, account heatmap rows, repo cards, readable issue/PR previews, pinned state, and normalized heatmap cells.
 

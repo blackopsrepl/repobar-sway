@@ -36,6 +36,8 @@ Make GitHub.com and local Forgejo repository pressure visible without opening a 
 - Use Waybar only as a compact launcher/render surface.
 - Keep hosted API calls out of QML.
 - Keep search, refresh, provider switching, and repo visibility actions daemon-owned.
+- Keep provider switching cache-first: restore cached provider snapshots immediately when available, and never let a late refresh from an older provider/config identity overwrite the active provider view.
+- Coalesce daemon-triggered refresh requests so rapid UI actions do not spawn unbounded refresh work.
 
 ## Runtime Contract
 
@@ -73,5 +75,7 @@ Repo-card controls must remain inside the panel bounds at the minimum supported 
 - Local checkout state is matched to hosted repositories without mutating local repos.
 - Pin/unpin/hide/show updates are visible immediately through projected cached state, then hydrated by daemon refresh.
 - Provider switching restores cached provider snapshots immediately when available.
+- Provider switching remains instant from cache even when a previous provider refresh is still in flight.
+- Repeated refresh-triggering actions produce at most one active refresh and one pending daemon follow-up.
 - The SolverForge Waybar module opens the panel and refreshes on demand.
 - `bin/release-check` passes on the local machine.

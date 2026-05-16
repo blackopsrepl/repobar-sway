@@ -30,7 +30,9 @@
 - Keep runtime actions daemon-owned. CLI and QuickShell dispatch actions; `Runtime::Daemon` and `Runtime::Store` own refresh, search, provider switching, pin/unpin/hide/show, and projection.
 - Keep QuickShell presentation backed by `snapshot.json`, `ui.json`, `search.json`, and `state-event.json`.
 - Waybar must remain a cached-state renderer, not a fetch path.
-- Provider switching must preserve provider-specific cached snapshots under `providers/github.json` and `providers/forgejo.json`.
+- Provider switching must preserve provider-specific cached snapshots under `providers/github.json` and `providers/forgejo.json`, restore the target snapshot synchronously when available, and keep switching independent of network latency.
+- Refresh results must not overwrite the active provider snapshot if the refresh started under an older provider/config identity. Late refreshes should update only their original provider cache.
+- Daemon-triggered refresh requests should coalesce through the runtime daemon instead of spawning one refresh thread per UI action.
 - Search must remain an async state transaction through `search.json`; do not make QuickShell block on network search.
 
 ## UI Rules
