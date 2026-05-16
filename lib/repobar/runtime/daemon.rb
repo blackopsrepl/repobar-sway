@@ -91,14 +91,14 @@ module RepoBar
         server = UNIXServer.new(socket_path)
         File.chmod(0o600, socket_path)
         next_refresh_at = Time.now
-        refresh_thread = nil
+        refresh_state = { thread: nil, pending: false, mutex: Mutex.new }
         search_threads = []
         mutex = Mutex.new
 
         loop do
           config = Core::Config.load_config(config_path)
           if Time.now >= next_refresh_at
-            refresh_thread = start_refresh_thread(config_path, refresh_thread)
+            request_refresh(config_path, refresh_state, queue_pending: false)
             next_refresh_at = Time.now + config.dig(:runtime, :refreshSeconds).to_i
           end
 
@@ -107,7 +107,7 @@ module RepoBar
 
           client = server.accept
           request = client.gets
-          result = handle_action(config_path, JSON.parse(request.to_s, symbolize_names: true), mutex, search_threads)
+          result = handle_action(config_path, JSON.parse(request.to_s, symbolize_names: true), mutex, search_threads, refresh_state)
           client.write("#{JSON.generate(ok: true, result: result)}\n")
         rescue StandardError => e
           client&.write("#{JSON.generate(ok: false, error: e.message)}\n")
@@ -121,7 +121,7 @@ module RepoBar
         FileUtils.rm_f(socket_path) if socket_path
       end
 
-      def handle_action(config_path, action, mutex, search_threads)
+      def handle_action(config_path, action, mutex, search_threads, refresh_state)
         type = action[:type].to_s
         result = nil
         refresh_needed = false
@@ -142,6 +142,8 @@ module RepoBar
           when "unpin"
             result = Store.unpin_repo(config_path, action[:fullName])
             refresh_needed = true
+          when "pin_move"
+            result = Store.move_pinned_repo(config_path, action[:fullName], action[:position])
           when "hide"
             result = Store.hide_repo(config_path, action[:fullName])
             refresh_needed = true
@@ -160,19 +162,43 @@ module RepoBar
           end
         end
 
-        start_refresh_thread(config_path) if refresh_needed
+        request_refresh(config_path, refresh_state) if refresh_needed
         search_threads << start_search_thread(config_path, *search_job) if search_job
         result
       end
 
-      def start_refresh_thread(config_path, existing = nil)
-        return existing if existing&.alive?
+      def request_refresh(config_path, refresh_state, queue_pending: true)
+        refresh_state[:mutex].synchronize do
+          if refresh_state[:thread]&.alive?
+            refresh_state[:pending] = true if queue_pending
+            return refresh_state[:thread]
+          end
 
-        Thread.new do
-          refresh(config_path)
-        rescue StandardError => e
-          warn "repobar daemon refresh error: #{e.message}"
+          refresh_state[:pending] = false
+          refresh_state[:thread] = Thread.new { refresh_loop(config_path, refresh_state) }
         end
+      end
+
+      def refresh_loop(config_path, refresh_state)
+        loop do
+          refresh(config_path)
+          repeat = refresh_state[:mutex].synchronize do
+            if refresh_state[:pending]
+              refresh_state[:pending] = false
+              true
+            else
+              refresh_state[:thread] = nil
+              false
+            end
+          end
+          break unless repeat
+        end
+      rescue StandardError => e
+        refresh_state[:mutex].synchronize do
+          refresh_state[:thread] = nil
+          refresh_state[:pending] = false
+        end
+        warn "repobar daemon refresh error: #{e.message}"
       end
 
       def start_search_thread(config_path, query, limit, request_id)

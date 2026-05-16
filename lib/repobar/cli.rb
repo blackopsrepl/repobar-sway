@@ -587,6 +587,16 @@ module RepoBar
     end
 
     def run_repo_visibility_command(command, args, config_path)
+      if command == "pin" && args[:positionals].first == "move"
+        full_name = args[:positionals][1]
+        position = args[:positionals][2]
+        raise ArgumentError, "pin move requires owner/name and zero-based position." unless full_name.to_s.match?(%r{\A[^/\s]+/[^/\s]+\z}) && position.to_s.match?(/\A\d+\z/)
+
+        repo_list = Runtime::Daemon.dispatch_action(config_path, type: "pin_move", fullName: full_name, position: position.to_i)
+        args[:format] == "json" ? print_json(repo_list, args) : puts("moved #{full_name.to_s.downcase} to #{position.to_i + 1}")
+        return 0
+      end
+
       full_name = args[:positionals].first
       repo_list = case command
                   when "pin" then Runtime::Daemon.dispatch_action(config_path, type: "pin", fullName: full_name)
@@ -842,6 +852,7 @@ module RepoBar
           repobar worktrees <path|owner/name>
           repobar checkout owner/name
           repobar pin|unpin|hide|show owner/name
+          repobar pin move owner/name POSITION
           repobar settings show|set
           repobar cache status|clear
           repobar rate-limits

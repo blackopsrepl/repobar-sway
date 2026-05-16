@@ -62,9 +62,10 @@ module RepoBar
           .reject { |repo| repo[:fork] && !config.dig(:repoList, :showForks) }
           .reject { |repo| repo[:archived] && !config.dig(:repoList, :showArchived) }
         sorted = sort_repositories(filtered, config.dig(:repoList, :menuSort))
-        selected = (pinned.filter_map { |name| sorted.find { |repo| repo[:fullName].casecmp?(name) } } +
-          sorted.reject { |repo| pinned.include?(repo[:fullName].downcase) }).uniq { |repo| repo[:fullName].downcase }
-        selected.first(limit).map { |repo| hydrate_repository(config, token, repo) }
+        pinned_repos = pinned.filter_map { |name| sorted.find { |repo| repo[:fullName].casecmp?(name) } }
+        unpinned_repos = sorted.reject { |repo| pinned.include?(repo[:fullName].downcase) }
+        selected = (pinned_repos + unpinned_repos.first(limit)).uniq { |repo| repo[:fullName].downcase }
+        selected.map { |repo| hydrate_repository(config, token, repo) }
       end
 
       def user_repositories(config, token, limit)

@@ -39,6 +39,23 @@ class ForgejoTest < Minitest::Test
     assert_nil RepoBar::Core::GitHub.access_token(config)
   end
 
+  def test_fetch_repositories_does_not_cap_pinned_repositories
+    config = build_config
+    config[:repoList][:displayLimit] = 1
+    config[:repoList][:pinnedRepositories] = ["one/one", "two/two", "three/three"]
+    config[:repoList][:visibleRepositories] = ["extra/extra"]
+
+    RepoBar::Core::GitHub.stub(:access_token, "token") do
+      RepoBar::Core::GitHub.stub(:repository, ->(_config, _token, full_name) { sample_repo(name: full_name) }) do
+        RepoBar::Core::GitHub.stub(:hydrate_repository, ->(_config, _token, repo) { repo }) do
+          repos = RepoBar::Core::GitHub.fetch_repositories(config)
+
+          assert_equal ["one/one", "two/two", "three/three", "extra/extra"], repos.map { |repo| repo[:fullName] }
+        end
+      end
+    end
+  end
+
   def test_github_heatmap_uses_recent_commit_activity
     config = build_config
     today = Date.today.iso8601

@@ -81,6 +81,22 @@ module RepoBar
         end
       end
 
+      def move_pinned_repo(config_path, full_name, position)
+        normalized = normalize_full_name(full_name)
+        config = Core::Config.load_config(config_path)
+        pinned = Array(config.dig(:repoList, :pinnedRepositories))
+        current_index = pinned.index(normalized)
+        raise ArgumentError, "Pinned repository not found: #{normalized}" unless current_index
+
+        pinned.delete_at(current_index)
+        target_index = [[position.to_i, 0].max, pinned.length].min
+        pinned.insert(target_index, normalized)
+        config[:repoList][:pinnedRepositories] = pinned
+        saved = Core::Config.save_config(config, config_path)
+        project_repo_visibility(saved, normalized)
+        saved[:repoList]
+      end
+
       def hide_repo(config_path, full_name)
         mutate_repo_visibility(config_path, full_name) do |repo_list, normalized|
           repo_list[:pinnedRepositories].delete(normalized)
@@ -151,6 +167,7 @@ module RepoBar
 
       def refresh_effect(config_path)
         config = Core::Config.load_config(config_path)
+        started_identity = refresh_identity(config)
         account = Core::GitHub.auth_status(config)
         if account[:authenticated] && config.dig(:settings, :showContributionHeader)
           account[:heatmap] = Core::GitHub.account_heatmap(config, Core::GitHub.access_token(config), account[:login])
@@ -158,7 +175,15 @@ module RepoBar
         repositories = Core::GitHub.fetch_repositories(config)
         local_repositories = Core::LocalGit.scan(config)
         repositories = Core::LocalGit.match_repositories(repositories, local_repositories)
-        commit_refresh(config, repositories, local_repositories, account)
+        current = Core::Config.load_config(config_path)
+        if refresh_identity(current) == started_identity
+          commit_refresh(current, repositories, local_repositories, account)
+        else
+          target_config = stale_refresh_provider_config(config, current)
+          snapshot = stale_refresh_snapshot(config, target_config, repositories, local_repositories, account)
+          State.write_provider_snapshot(target_config, snapshot, snapshot.dig(:config, :provider))
+          snapshot
+        end
       end
 
       def search_effect(config_path, query, limit, request_id)
@@ -194,6 +219,7 @@ module RepoBar
         repositories = ensure_projected_repo(config, repositories, changed_full_name)
         hidden = Array(config.dig(:repoList, :hiddenRepositories))
         repositories.reject! { |repo| hidden.include?(repo[:fullName].to_s.downcase) }
+        repositories = order_repositories_for_config(config, repositories)
         account = deep_dup(previous && previous[:account]) || {}
         account[:provider] = config.dig(:github, :provider)
         commit_projection(config, repositories: repositories, local_repositories: Array(previous && previous[:localRepositories]), account: account)
@@ -207,6 +233,38 @@ module RepoBar
         search_repo = Array(State.read_search_state(config)[:results]).find { |repo| repo[:fullName].to_s.downcase == full_name }
         repositories.unshift((search_repo ? deep_dup(search_repo) : lightweight_repo(config, full_name)).merge(pending: true))
         repositories
+      end
+
+      def order_repositories_for_config(config, repositories)
+        pinned_positions = Array(config.dig(:repoList, :pinnedRepositories)).each_with_index.to_h
+        repositories.sort_by.with_index do |repo, index|
+          full_name = repo[:fullName].to_s.downcase
+          pinned_positions.key?(full_name) ? [0, pinned_positions[full_name]] : [1, index]
+        end
+      end
+
+      def stale_refresh_snapshot(started_config, current_config, repositories, local_repositories, account)
+        return State.build_snapshot(started_config, repositories, local_repositories, account) if current_config.dig(:github, :provider) != started_config.dig(:github, :provider)
+
+        current_repositories = repositories.map { |repo| deep_dup(repo) }
+        hidden = Array(current_config.dig(:repoList, :hiddenRepositories))
+        current_repositories.reject! { |repo| hidden.include?(repo[:fullName].to_s.downcase) }
+        active_repositories = Array(State.read_snapshot(current_config)&.dig(:repositories))
+        Array(current_config.dig(:repoList, :pinnedRepositories)).each do |full_name|
+          next if current_repositories.any? { |repo| repo[:fullName].to_s.downcase == full_name }
+
+          active_repo = active_repositories.find { |repo| repo[:fullName].to_s.downcase == full_name }
+          current_repositories << (active_repo ? deep_dup(active_repo) : lightweight_repo(current_config, full_name))
+        end
+        current_repositories = order_repositories_for_config(current_config, current_repositories)
+        State.build_snapshot(current_config, current_repositories, local_repositories, account.merge(provider: current_config.dig(:github, :provider)))
+      end
+
+      def stale_refresh_provider_config(started_config, current_config)
+        return started_config if current_config.dig(:github, :provider) != started_config.dig(:github, :provider)
+        return started_config if current_config.dig(:runtime, :stateDir) != started_config.dig(:runtime, :stateDir)
+
+        current_config
       end
 
       def commit_projection(config, repositories:, local_repositories:, account:)
@@ -251,6 +309,16 @@ module RepoBar
 
       def deep_dup(value)
         Marshal.load(Marshal.dump(value))
+      end
+
+      def refresh_identity(config)
+        {
+          github: config[:github],
+          repoList: config[:repoList],
+          settings: { showContributionHeader: config.dig(:settings, :showContributionHeader) },
+          localProjects: config[:localProjects],
+          stateDir: config.dig(:runtime, :stateDir)
+        }
       end
 
       def timestamp
