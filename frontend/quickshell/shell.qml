@@ -167,6 +167,81 @@ ShellRoot {
         }
     }
 
+    component DragHandle: Item {
+        id: handle
+
+        property string tooltip: ""
+        property string dragFullName: ""
+        property bool active: dragArea.drag.active
+        property string iconColor: "#DDF7FF"
+        property string accentColor: "#F2C572"
+
+        Layout.preferredWidth: 34
+        Layout.preferredHeight: 34
+        implicitWidth: 34
+        implicitHeight: 34
+
+        ToolTip.delay: 350
+        ToolTip.visible: dragArea.containsMouse && handle.tooltip.length > 0
+        ToolTip.text: handle.tooltip
+        Accessible.name: handle.tooltip
+        Accessible.role: Accessible.Button
+
+        Drag.active: dragArea.drag.active
+        Drag.keys: ["repobar-pinned-repo"]
+        Drag.hotSpot.x: width / 2
+        Drag.hotSpot.y: height / 2
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 4
+            color: handle.active ? "#2E281B" : dragArea.containsMouse ? "#221F19" : "#0F1324"
+            border.width: 1
+            border.color: handle.active || dragArea.containsMouse ? handle.accentColor : "#253057"
+        }
+
+        Canvas {
+            id: dragIcon
+            anchors.centerIn: parent
+            width: 18
+            height: 18
+
+            Connections {
+                target: handle
+                function onActiveChanged() { dragIcon.requestPaint() }
+                function onIconColorChanged() { dragIcon.requestPaint() }
+                function onAccentColorChanged() { dragIcon.requestPaint() }
+            }
+
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = handle.active ? handle.accentColor : handle.iconColor
+                for (var row = 0; row < 3; row++) {
+                    for (var column = 0; column < 2; column++) {
+                        ctx.beginPath()
+                        ctx.arc(6 + column * 6, 5 + row * 4, 1.35, 0, Math.PI * 2)
+                        ctx.fill()
+                    }
+                }
+            }
+        }
+
+        MouseArea {
+            id: dragArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            drag.target: handle
+            onPressed: handle.z = 20
+            onReleased: {
+                handle.x = 0
+                handle.y = 0
+                handle.z = 0
+            }
+        }
+    }
+
     function statusColor(status) {
         if (status === "error" || status === "ci-failing") {
             return "#E06C75"
@@ -329,6 +404,14 @@ ShellRoot {
         return false
     }
 
+    function movePinnedRepo(fullName, position) {
+        var normalized = (fullName || "").toString().toLowerCase()
+        if (normalized.length === 0) {
+            return
+        }
+        runRepobar(["pin", "move", normalized, position.toString()])
+    }
+
     function searchStatusText() {
         if (searchData.status === "loading") {
             return "Searching " + searchData.query + "..."
@@ -419,17 +502,24 @@ ShellRoot {
         id: panel
         visible: uiAdapter.open
         screen: Quickshell.screens.length ? Quickshell.screens[0] : null
-        implicitWidth: Math.min(900, Math.max(420, (screen ? screen.width : 900) - 36))
-        implicitHeight: Math.min(700, Math.max(420, (screen ? screen.height : 700) - 72))
+        property int verticalMargin: 18
+        implicitWidth: screen ? screen.width : 960
+        implicitHeight: screen ? screen.height : 760
         color: "transparent"
         focusable: true
+        aboveWindows: true
+        exclusionMode: ExclusionMode.Ignore
         anchors {
             top: true
+            bottom: true
+            left: true
             right: true
         }
         margins {
-            top: 36
-            right: 12
+            top: 0
+            bottom: 0
+            left: 0
+            right: 0
         }
         onVisibleChanged: {
             if (visible) {
@@ -445,19 +535,31 @@ ShellRoot {
             onActivated: root.closePanel()
         }
 
-        Rectangle {
+        Item {
             anchors.fill: parent
-            color: "#0B0C16"
-            border.color: "#82FB9C"
-            border.width: 1
-            radius: 4
-            focus: true
-            Keys.onEscapePressed: root.closePanel()
 
-            ColumnLayout {
+            Rectangle {
                 anchors.fill: parent
-                anchors.margins: 14
-                spacing: 12
+                color: "#050711"
+                opacity: 0.66
+            }
+
+            Rectangle {
+                id: modalFrame
+                anchors.centerIn: parent
+                width: Math.min(960, Math.max(320, panel.width - 36))
+                height: Math.min(panel.height - 16, Math.max(420, panel.height - (panel.verticalMargin * 2)))
+                color: "#0B0C16"
+                border.color: "#82FB9C"
+                border.width: 1
+                radius: 4
+                focus: true
+                Keys.onEscapePressed: root.closePanel()
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 12
 
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -573,7 +675,7 @@ ShellRoot {
                             Rectangle {
                                 Layout.preferredWidth: 220
                                 Layout.fillHeight: true
-                                visible: panel.width >= 760
+                                visible: modalFrame.width >= 760
                                 color: "#0B0C16"
                                 border.color: "#253057"
                                 border.width: 1
@@ -1073,12 +1175,36 @@ ShellRoot {
                             model: repositories
 
                             Rectangle {
+                                id: repoCard
+
+                                property bool dropTarget: false
+                                property string dragFullName: (modelData.fullName || "").toString().toLowerCase()
+                                property int repoIndex: index
+
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 196
-                                color: "#141528"
-                                border.color: statusColor(modelData.status)
+                                color: dropTarget ? "#1D1A24" : "#141528"
+                                border.color: dropTarget ? "#F2C572" : statusColor(modelData.status)
                                 border.width: 1
                                 radius: 4
+
+                                DropArea {
+                                    anchors.fill: parent
+                                    enabled: modelData.pinned
+                                    keys: ["repobar-pinned-repo"]
+                                    onEntered: function(drag) {
+                                        if (drag.source && drag.source.dragFullName !== repoCard.dragFullName) {
+                                            repoCard.dropTarget = true
+                                        }
+                                    }
+                                    onExited: repoCard.dropTarget = false
+                                    onDropped: function(drop) {
+                                        repoCard.dropTarget = false
+                                        if (drop.source && drop.source.dragFullName !== repoCard.dragFullName) {
+                                            root.movePinnedRepo(drop.source.dragFullName, repoCard.repoIndex)
+                                        }
+                                    }
+                                }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -1181,7 +1307,7 @@ ShellRoot {
                                             color: "#6A6E95"
                                             font.family: root.textFont
                                             font.pixelSize: 10
-                                            Layout.preferredWidth: panel.width < 560 ? 108 : 136
+                                            Layout.preferredWidth: modalFrame.width < 560 ? 108 : 136
                                             Layout.maximumWidth: 150
                                             elide: Text.ElideRight
                                         }
@@ -1212,6 +1338,12 @@ ShellRoot {
                                             id: repoActionStrip
                                             Layout.preferredWidth: implicitWidth
                                             spacing: 2
+
+                                            DragHandle {
+                                                visible: modelData.pinned
+                                                tooltip: "Drag pinned repository"
+                                                dragFullName: repoCard.dragFullName
+                                            }
 
                                             RepoActionButton {
                                                 iconName: "open"
@@ -1258,6 +1390,7 @@ ShellRoot {
                     }
                 }
             }
+        }
         }
     }
 }
