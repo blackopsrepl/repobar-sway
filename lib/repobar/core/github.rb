@@ -102,20 +102,24 @@ module RepoBar
       def hydrate_repository(config, token, repo)
         owner = repo[:owner]
         name = repo[:name]
-        issues = open_issue_count(config, token, "#{owner}/#{name}", repo)
-        pulls = open_pull_count(config, token, "#{owner}/#{name}", repo)
+        issue_count = open_issue_count(config, token, "#{owner}/#{name}", repo)
+        pull_count = open_pull_count(config, token, "#{owner}/#{name}", repo)
+        issue_items = issue_count.positive? ? issues(config, token, owner, name, 5) : []
+        pull_items = pull_count.positive? ? pulls(config, token, owner, name, 5) : []
         release = latest_release(config, token, owner, name)
         ci = latest_ci(config, token, owner, name)
         activity = recent_activity(config, token, owner, name)
         traffic = traffic(config, token, owner, name)
         heatmap = heatmap(config, token, owner, name)
         repo.merge(
-          stats: repo.fetch(:stats, {}).merge(openIssues: issues, openPulls: pulls),
+          stats: repo.fetch(:stats, {}).merge(openIssues: issue_count, openPulls: pull_count),
           latestRelease: release,
           ciStatus: ci[:status],
           ciRun: ci[:run],
           latestActivity: activity.first,
           activity: activity,
+          issues: issue_items,
+          pulls: pull_items,
           traffic: traffic,
           heatmap: heatmap
         )
@@ -295,6 +299,112 @@ module RepoBar
         []
       end
 
+      def account_heatmap(config, token, login)
+        return forgejo_account_heatmap(config, token, login) if forgejo?(config)
+        return unavailable_heatmap if token.to_s.empty? || login.to_s.empty?
+
+        start_date = Date.today - 365
+        query = <<~GRAPHQL
+          query($login: String!, $from: DateTime!, $to: DateTime!) {
+            user(login: $login) {
+              contributionsCollection(from: $from, to: $to) {
+                contributionCalendar {
+                  totalContributions
+                  weeks {
+                    contributionDays {
+                      date
+                      contributionCount
+                    }
+                  }
+                }
+              }
+            }
+          }
+        GRAPHQL
+        data = graphql_request(
+          config,
+          token,
+          query,
+          {
+            login: login,
+            from: Time.utc(start_date.year, start_date.month, start_date.day).iso8601,
+            to: Time.now.utc.iso8601
+          }
+        )
+        calendar = data.dig(:data, :user, :contributionsCollection, :contributionCalendar) || {}
+        weeks = Array(calendar[:weeks]).map do |week|
+          {
+            cells: Array(week[:contributionDays]).map do |day|
+              { date: day[:date], count: day[:contributionCount].to_i }
+            end
+          }
+        end
+        cells = weeks.flat_map { |week| week[:cells] }
+        max = cells.map { |cell| cell[:count].to_i }.max.to_i
+        total = (calendar[:totalContributions] || cells.sum { |cell| cell[:count].to_i }).to_i
+        { available: true, total: total, max: max, cells: cells, weeks: weeks }
+      rescue StandardError
+        unavailable_heatmap
+      end
+
+      def forgejo_account_heatmap(config, token, login)
+        heatmap_login = forgejo_heatmap_login(login)
+        return unavailable_heatmap if heatmap_login.empty?
+
+        start_date = Date.today - 365
+        end_date = Date.today
+        response = request(config, "/users/#{URI.encode_www_form_component(heatmap_login)}/heatmap", token: token)
+        counts = Hash.new(0)
+        Array(response.data).each do |item|
+          date = forgejo_heatmap_date(item)
+          next unless date && date >= start_date && date <= end_date
+
+          counts[date.iso8601] += (item[:contributions] || item["contributions"] || item[:count] || item["count"]).to_i
+        end
+        weeks = calendar_weeks_from_counts(counts, start_date, end_date)
+        cells = weeks.flat_map { |week| week[:cells] }
+        max = cells.map { |cell| cell[:count].to_i }.max.to_i
+        { available: true, total: cells.sum { |cell| cell[:count].to_i }, max: max, cells: cells, weeks: weeks, login: heatmap_login }
+      rescue StandardError
+        unavailable_heatmap
+      end
+
+      def forgejo_heatmap_login(login)
+        clean = login.to_s.strip
+        return clean unless clean.empty? || clean == "forgejo:public"
+
+        configured = ENV["REPOBAR_FORGEJO_LOGIN"].to_s.strip
+        return configured unless configured.empty?
+
+        ENV["USER"].to_s.strip
+      end
+
+      def forgejo_heatmap_date(item)
+        timestamp = (item[:timestamp] || item["timestamp"]).to_i
+        return nil if timestamp <= 0
+
+        timestamp /= 1000 if timestamp > 20_000_000_000
+        Time.at(timestamp).utc.to_date
+      rescue StandardError
+        nil
+      end
+
+      def calendar_weeks_from_counts(counts, start_date, end_date)
+        week_start = start_date - start_date.wday
+        last_week_start = end_date - end_date.wday
+        weeks = []
+        while week_start <= last_week_start
+          weeks << {
+            cells: (0...7).map do |day|
+              date = week_start + day
+              { date: date.iso8601, count: date >= start_date && date <= end_date ? counts[date.iso8601].to_i : 0 }
+            end
+          }
+          week_start += 7
+        end
+        weeks
+      end
+
       def traffic(config, token, owner, name)
         return nil if forgejo?(config) || token.to_s.empty?
 
@@ -359,6 +469,8 @@ module RepoBar
           state: item[:state] || item["state"],
           updatedAt: item[:updated_at] || item["updated_at"],
           url: item[:html_url] || item["html_url"],
+          body: item[:body] || item["body"],
+          comments: (item[:comments] || item["comments"]).to_i,
           labels: Array(item[:labels] || item["labels"]).map { |label| label[:name] || label["name"] }
         }
       end
@@ -371,7 +483,10 @@ module RepoBar
           state: item[:state] || item["state"],
           draft: !!(item[:draft] || item["draft"]),
           updatedAt: item[:updated_at] || item["updated_at"],
-          url: item[:html_url] || item["html_url"]
+          url: item[:html_url] || item["html_url"],
+          body: item[:body] || item["body"],
+          comments: (item[:comments] || item["comments"]).to_i,
+          reviewComments: (item[:review_comments] || item["review_comments"]).to_i
         }
       end
 
@@ -653,6 +768,10 @@ module RepoBar
       def rest_cache_ttl(config)
         seconds = config.dig(:runtime, :refreshSeconds).to_i
         [[seconds, 30].max, 300].min
+      end
+
+      def unavailable_heatmap
+        { available: false, total: 0, max: 0, cells: [] }
       end
     end
   end

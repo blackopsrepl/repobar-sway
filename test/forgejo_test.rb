@@ -59,6 +59,123 @@ class ForgejoTest < Minitest::Test
     end
   end
 
+  def test_account_heatmap_uses_github_contribution_calendar
+    config = build_config
+    today = Date.today.iso8601
+    data = {
+      data: {
+        user: {
+          contributionsCollection: {
+            contributionCalendar: {
+              totalContributions: 4,
+              weeks: [
+                {
+                  contributionDays: [
+                    { date: today, contributionCount: 4 }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+
+    RepoBar::Core::GitHub.stub(:graphql_request, data) do
+      heatmap = RepoBar::Core::GitHub.account_heatmap(config, "token", "blackopsrepl")
+      counts = heatmap[:cells].to_h { |cell| [cell[:date], cell[:count]] }
+
+      assert_equal true, heatmap[:available]
+      assert_equal 4, heatmap[:total]
+      assert_equal 4, heatmap[:max]
+      assert_equal 4, counts[today]
+      assert_equal 1, heatmap[:weeks].length
+      assert_equal 1, heatmap.dig(:weeks, 0, :cells).length
+    end
+  end
+
+  def test_account_heatmap_uses_forgejo_user_heatmap
+    config = RepoBar::Core::Config.normalize_config(github: { provider: "forgejo" })
+    today = Date.today
+    yesterday = today - 1
+    response = RepoBar::Core::GitHub::Response.new(
+      data: [
+        { timestamp: Time.utc(today.year, today.month, today.day, 9).to_i, contributions: 2 },
+        { timestamp: Time.utc(today.year, today.month, today.day, 12).to_i, contributions: 3 },
+        { timestamp: Time.utc(yesterday.year, yesterday.month, yesterday.day, 12).to_i, contributions: 1 }
+      ],
+      headers: {},
+      status: 200
+    )
+    calls = []
+
+    RepoBar::Core::GitHub.stub(:request, lambda { |_config, path, token:|
+      calls << [path, token]
+      response
+    }) do
+      heatmap = RepoBar::Core::GitHub.account_heatmap(config, nil, "pvd")
+      counts = heatmap[:cells].to_h { |cell| [cell[:date], cell[:count]] }
+
+      assert_equal true, heatmap[:available]
+      assert_equal 6, heatmap[:total]
+      assert_equal 5, heatmap[:max]
+      assert_equal 5, counts[today.iso8601]
+      assert_equal 1, counts[yesterday.iso8601]
+      assert_operator heatmap[:weeks].length, :>=, 52
+      assert_equal [["/users/pvd/heatmap", nil]], calls
+    end
+  end
+
+  def test_public_forgejo_account_heatmap_uses_local_login
+    config = RepoBar::Core::Config.normalize_config(github: { provider: "forgejo" })
+    old_login = ENV["REPOBAR_FORGEJO_LOGIN"]
+    ENV["REPOBAR_FORGEJO_LOGIN"] = "pvd"
+    response = RepoBar::Core::GitHub::Response.new(data: [], headers: {}, status: 200)
+    calls = []
+
+    RepoBar::Core::GitHub.stub(:request, lambda { |_config, path, token:|
+      calls << [path, token]
+      response
+    }) do
+      heatmap = RepoBar::Core::GitHub.account_heatmap(config, nil, "forgejo:public")
+
+      assert_equal true, heatmap[:available]
+      assert_equal "pvd", heatmap[:login]
+      assert_equal [["/users/pvd/heatmap", nil]], calls
+    end
+  ensure
+    if old_login
+      ENV["REPOBAR_FORGEJO_LOGIN"] = old_login
+    else
+      ENV.delete("REPOBAR_FORGEJO_LOGIN")
+    end
+  end
+
+  def test_issue_and_pull_items_keep_readable_body_data
+    issue = RepoBar::Core::GitHub.map_issue_item(
+      number: 12,
+      title: "Fix panel",
+      body: "Panel body",
+      comments: 3,
+      user: { login: "pvd" },
+      labels: [{ name: "bug" }]
+    )
+    pull = RepoBar::Core::GitHub.map_pull_item(
+      number: 13,
+      title: "Add reader",
+      body: "Pull body",
+      comments: 1,
+      review_comments: 2,
+      user: { login: "pvd" }
+    )
+
+    assert_equal "Panel body", issue[:body]
+    assert_equal 3, issue[:comments]
+    assert_equal ["bug"], issue[:labels]
+    assert_equal "Pull body", pull[:body]
+    assert_equal 2, pull[:reviewComments]
+  end
+
   def test_fresh_rest_cache_short_circuits_network
     config = build_config
     uri = URI("https://api.github.com/repos/openclaw/openclaw")

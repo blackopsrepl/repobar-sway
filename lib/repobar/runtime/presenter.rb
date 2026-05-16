@@ -12,6 +12,7 @@ module RepoBar
         summary = summary_view(config, snapshot, repos, now)
         {
           summary: summary,
+          accountHeatmap: account_heatmap_view(snapshot.dig(:account, :heatmap)),
           chip: chip_view(summary, repos),
           repositories: repos.map { |repo| repo_view(config, repo, now) },
           localRepositories: Array(snapshot[:localRepositories])
@@ -105,12 +106,31 @@ module RepoBar
           ciStatus: repo[:ciStatus] || "unknown",
           latestRelease: repo[:latestRelease],
           latestActivity: repo[:latestActivity],
+          issues: readable_items(repo[:issues], now),
+          pulls: readable_items(repo[:pulls], now),
           traffic: repo[:traffic],
           heatmap: heatmap_view(repo[:heatmap]),
           local: local,
           pending: !!repo[:pending],
           status: repo_status(repo),
           error: repo[:error]
+        }
+      end
+
+      def account_heatmap_view(heatmap)
+        return nil unless heatmap
+
+        max = (heatmap && heatmap[:max]).to_i
+        weeks = Array(heatmap[:weeks]).map { |week| account_heatmap_week(week, max) }
+        weeks = account_heatmap_weeks_from_cells(Array(heatmap[:cells]), max) if weeks.empty?
+        {
+          available: heatmap[:available] != false,
+          total: heatmap[:total].to_i,
+          max: max,
+          weeks: weeks,
+          rows: account_heatmap_rows(weeks),
+          cells: weeks.flat_map { |week| week[:cells] },
+          stats: account_heatmap_stats(weeks)
         }
       end
 
@@ -132,9 +152,112 @@ module RepoBar
         }
       end
 
+      def account_heatmap_week(week, max)
+        cells = Array(week[:cells])
+        by_day = cells.to_h do |cell|
+          date = Date.parse(cell[:date].to_s)
+          [date.wday, heatmap_cell(cell, max)]
+        rescue ArgumentError
+          [nil, nil]
+        end
+        {
+          cells: (0...7).map { |day| by_day[day] || empty_heatmap_cell }
+        }
+      end
+
+      def account_heatmap_weeks_from_cells(cells, max)
+        days = cells.map { |cell| heatmap_cell(cell, max) }
+        days.each_slice(7).map do |slice|
+          { cells: slice.fill(empty_heatmap_cell, slice.length...7) }
+        end
+      end
+
+      def account_heatmap_rows(weeks)
+        (0...7).map do |day|
+          {
+            cells: weeks.map { |week| Array(week[:cells])[day] || empty_heatmap_cell }
+          }
+        end
+      end
+
+      def account_heatmap_stats(weeks)
+        cells = weeks.flat_map { |week| Array(week[:cells]) }.reject { |cell| cell[:empty] }
+        dated = cells.select { |cell| cell[:date].to_s != "" }.sort_by { |cell| cell[:date].to_s }
+        best = dated.max_by { |cell| [cell[:count].to_i, cell[:date].to_s] }
+        best_count = best ? best[:count].to_i : 0
+
+        {
+          activeDays: dated.count { |cell| cell[:count].to_i.positive? },
+          currentStreak: current_heatmap_streak(dated),
+          bestCount: best_count,
+          bestDay: best_count.positive? ? best[:date] : nil,
+          bestDayText: best_count.positive? ? heatmap_date_text(best[:date]) : "none"
+        }
+      end
+
+      def current_heatmap_streak(dated_cells)
+        streak = 0
+        dated_cells.reverse_each do |cell|
+          count = cell[:count].to_i
+          if count.positive?
+            streak += 1
+          else
+            break
+          end
+        end
+        streak
+      end
+
+      def heatmap_date_text(value)
+        Date.parse(value.to_s).strftime("%b %e").strip
+      rescue ArgumentError
+        value.to_s
+      end
+
+      def heatmap_cell(cell, max)
+        count = cell[:count].to_i
+        {
+          date: cell[:date],
+          count: count,
+          intensity: max.positive? ? ((count.to_f / max) * 4).ceil : 0
+        }
+      end
+
+      def readable_items(items, now)
+        Array(items).first(5).map { |item| readable_item(item, now) }
+      end
+
+      def readable_item(item, now)
+        {
+          number: item[:number],
+          title: item[:title].to_s,
+          author: item[:author].to_s,
+          body: readable_body(item[:body]),
+          state: item[:state].to_s,
+          updatedAt: item[:updatedAt],
+          updatedText: Core::Format.relative_time(item[:updatedAt], now),
+          url: item[:url],
+          labels: Array(item[:labels]).first(4),
+          draft: !!item[:draft],
+          comments: item[:comments].to_i,
+          reviewComments: item[:reviewComments].to_i
+        }
+      end
+
+      def readable_body(body)
+        text = body.to_s.gsub(/\s+/, " ").strip
+        return "No description." if text.empty?
+
+        text.length > 220 ? "#{text[0, 217]}..." : text
+      end
+
       def empty_heatmap_cells
         start = Date.today - 41
         (0...42).map { |offset| { date: (start + offset).iso8601, count: 0 } }
+      end
+
+      def empty_heatmap_cell
+        { date: nil, count: 0, intensity: 0, empty: true }
       end
 
       def repo_status(repo)

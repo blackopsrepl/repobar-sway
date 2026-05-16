@@ -152,6 +152,9 @@ module RepoBar
       def refresh_effect(config_path)
         config = Core::Config.load_config(config_path)
         account = Core::GitHub.auth_status(config)
+        if account[:authenticated] && config.dig(:settings, :showContributionHeader)
+          account[:heatmap] = Core::GitHub.account_heatmap(config, Core::GitHub.access_token(config), account[:login])
+        end
         repositories = Core::GitHub.fetch_repositories(config)
         local_repositories = Core::LocalGit.scan(config)
         repositories = Core::LocalGit.match_repositories(repositories, local_repositories)
