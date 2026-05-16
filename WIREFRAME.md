@@ -1,36 +1,134 @@
 # RepoBar Repo Wireframe
 
+## Product Boundary
+
+RepoBar Linux is a repository-pressure companion for SolverForge Linux. The product surface is a Waybar chip plus one QuickShell panel. The backend is Ruby, cache-backed, and daemon-owned.
+
+No UI layer fetches hosted repository data directly. GitHub.com and Forgejo calls stay in `lib/repobar/core/github.rb`; local checkout inspection stays in `lib/repobar/core/local_git.rb`.
+
 ## High-Level Shape
 
 1. `bin/repobar` starts the CLI.
-2. `lib/repobar/cli.rb` routes commands.
-3. `lib/repobar/core/github.rb` fetches GitHub.com data through the `gh` token or local Forgejo data through `http://vigilance:3002/api/v1`.
-4. `lib/repobar/core/local_git.rb` scans local checkouts and maps them to hosted repos.
-5. `lib/repobar/runtime/daemon.rb` refreshes data and writes snapshots.
-6. `lib/repobar/runtime/presenter.rb` converts raw repo data into UI-ready state.
-7. `lib/repobar/runtime/waybar.rb` renders the compact Waybar JSON payload.
-8. `lib/repobar/runtime/quickshell.rb` opens and controls the QuickShell panel.
-9. `frontend/quickshell/shell.qml` renders the human UI.
+2. `lib/repobar/cli.rb` parses commands and dispatches either read-only work or daemon-owned actions.
+3. `lib/repobar/core/config.rb` normalizes config and settings.
+4. `lib/repobar/core/cache.rb` stores REST responses, GraphQL responses, and rate-limit observations.
+5. `lib/repobar/core/github.rb` fetches GitHub.com and Forgejo repository/account data.
+6. `lib/repobar/core/local_git.rb` scans local checkouts and maps them to hosted repos.
+7. `lib/repobar/runtime/daemon.rb` owns the action socket, refresh loop, search jobs, and async effects.
+8. `lib/repobar/runtime/store.rb` mutates runtime/config state for provider switches, visibility changes, search state, and projections.
+9. `lib/repobar/runtime/state.rb` reads and writes cached JSON state.
+10. `lib/repobar/runtime/presenter.rb` converts raw data into UI-ready `view` state.
+11. `lib/repobar/runtime/waybar.rb` renders compact Waybar JSON from cached state.
+12. `lib/repobar/runtime/quickshell.rb` opens, closes, toggles, and launches the QuickShell shell.
+13. `frontend/quickshell/shell.qml` renders the human UI from watched JSON files.
 
-## Data Flow
+## Runtime Files
 
-Normal refresh:
+All runtime files default to `~/.local/state/repobar/`.
 
-1. `repobar daemon` or `repobar refresh` loads config.
-2. GitHub.com auth is read from `gh auth token`; Forgejo public mode does not require a token.
-3. Repositories are fetched and hydrated with issues, PRs, CI, release, and activity data.
-4. Local git repos are scanned from configured roots.
-5. Local state is matched to repository rows.
-6. A snapshot is written to `~/.local/state/repobar/snapshot.json`.
-7. Waybar is signaled.
-8. QuickShell updates from the watched file.
+- `snapshot.json`: canonical cached snapshot plus presenter `view`.
+- `providers/github.json`: last cached GitHub snapshot.
+- `providers/forgejo.json`: last cached Forgejo snapshot.
+- `ui.json`: panel open state, focused repo, request timestamp.
+- `search.json`: async search status, query, request id, selection, results, error, timestamp.
+- `state-event.json`: stable watched reload signal for QuickShell.
+- `daemon.lock`: daemon singleton lock.
+- `daemon.sock`: daemon action socket.
+- `refresh.lock`: refresh serialization lock.
+- `cache/rest.json`: REST cache keyed by request URI.
+- `cache/graphql.json`: GraphQL cache keyed by query and variables.
+- `cache/rate_limits.json`: observed rate-limit state.
 
-UI flow:
+## Refresh Flow
 
-1. Waybar calls `solverforge-waybar-repobar open`.
-2. The wrapper calls `repobar waybar panel`.
-3. `ui.json` is updated and QuickShell is started if needed.
-4. QuickShell reads `snapshot.json` and `ui.json`.
+1. `repobar daemon`, `repobar daemon --once`, or `repobar refresh` loads config.
+2. `Runtime::State.with_refresh_lock` serializes refresh work.
+3. `Core::GitHub.auth_status` checks GitHub auth or Forgejo public/private access.
+4. If authenticated and `settings.showContributionHeader` is enabled, `Core::GitHub.account_heatmap` fetches the account activity calendar.
+5. `Core::GitHub.fetch_repositories` loads pinned/visible repositories or recent user repositories, filters hidden/fork/archive rows, sorts them, and hydrates selected rows.
+6. Hydration adds open issue/PR counts, issue/PR preview items, latest release, CI status, recent activity, traffic where available, and per-repo activity heatmap.
+7. `Core::LocalGit.scan` scans configured roots and `Core::LocalGit.match_repositories` attaches local branch/dirty/ahead/behind state.
+8. `Runtime::Presenter.build_snapshot_view` creates summary, chip, account heatmap, repo views, and local repo views.
+9. `Runtime::State.write_snapshot` writes `snapshot.json`, writes the active provider snapshot, and updates `state-event.json`.
+10. `Runtime::Store.signal_waybar` sends the configured RTMIN signal to Waybar.
+
+## Action Flow
+
+1. CLI commands and QuickShell call `Runtime::Daemon.dispatch_action`.
+2. `Runtime::Daemon.ensure_running` starts `repobar daemon` if no action socket is ready.
+3. The daemon handles actions on `daemon.sock` and returns JSON results.
+4. Actions that change provider or repo visibility also start an async refresh thread.
+
+Daemon-owned actions:
+
+- `open_panel`
+- `close_panel`
+- `set_provider`
+- `pin`
+- `unpin`
+- `hide`
+- `show`
+- `search_start`
+- `search_select`
+- `ping`
+
+## Provider Flow
+
+1. `repobar provider github|forgejo` dispatches `set_provider`.
+2. The current snapshot is saved under the current provider cache path.
+3. Config is rewritten with provider host, API host, and auth source.
+4. `search.json` is reset.
+5. If the target provider has a cached provider snapshot, that snapshot is projected immediately.
+6. If not, a blank provider projection is written while async refresh starts.
+
+## Search Flow
+
+1. QuickShell text input calls `repobar search <query> --limit 8`.
+2. The daemon writes `search.json` as `loading` with a request id.
+3. A search thread calls `Core::GitHub.search_repositories`.
+4. The daemon writes `search.json` as `ready` or `error`.
+5. QuickShell renders up to six results.
+6. Search results can be selected, opened, or pinned.
+7. Pinning a search result inserts a pending projected repo into `snapshot.json`; the next refresh hydrates it.
+
+## QuickShell Layout
+
+Panel:
+
+1. Header with title, active account, repository/work counts, provider switch buttons, refresh, and close.
+2. Optional account activity heatmap with summary stats.
+3. Search input and result list.
+4. Optional issue/PR reader panel for the selected repository.
+5. Scrollable repository card list.
+
+Repo cards:
+
+1. Status rail.
+2. Owner avatar or fallback initial.
+3. Repository name, description, CI/PR/issue/star/update line, local checkout line, release/activity line.
+4. Activity heatmap text plus clipped heatmap track.
+5. Icon action strip: open, read, refresh, pin/unpin, hide.
+
+Search results:
+
+1. Owner avatar or fallback initial.
+2. Repository name, description, stars.
+3. Icon actions: open and pin/already-pinned.
+
+Reader panel:
+
+1. Selected repo title and work count.
+2. Up to three cached PR previews.
+3. Up to three cached issue previews.
+4. Open buttons for preview URLs.
+
+## Waybar Flow
+
+1. Waybar calls `repobar waybar render`.
+2. `Runtime::Waybar.payload` reads the cached snapshot only.
+3. If no snapshot exists, Waybar renders a loading chip.
+4. If a snapshot exists, presenter chip text and classes become the Waybar JSON payload.
+5. Middle click should route to `repobar waybar refresh`; left/right click should route to `repobar waybar panel` or equivalent wrapper.
 
 ## Canonical Files
 
@@ -38,14 +136,19 @@ UI flow:
 - `PRD.md`
 - `WIREFRAME.md`
 - `AGENTS.md`
+- `docs/architecture.md`
+- `docs/cli.md`
 - `bin/repobar`
 - `bin/release-check`
 - `lib/repobar/core/config.rb`
+- `lib/repobar/core/cache.rb`
 - `lib/repobar/core/github.rb`
 - `lib/repobar/core/local_git.rb`
 - `lib/repobar/runtime/state.rb`
+- `lib/repobar/runtime/store.rb`
 - `lib/repobar/runtime/presenter.rb`
 - `lib/repobar/runtime/daemon.rb`
 - `lib/repobar/runtime/quickshell.rb`
 - `lib/repobar/runtime/waybar.rb`
 - `frontend/quickshell/shell.qml`
+- `test/`
