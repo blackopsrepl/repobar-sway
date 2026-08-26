@@ -1159,49 +1159,23 @@ ShellRoot {
                     }
                 }
 
-                Flickable {
-                    id: repoScroll
+                ListView {
+                    id: repoList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    contentWidth: width
-                    contentHeight: repoColumn.implicitHeight
                     clip: true
+                    spacing: 8
+                    model: repositories
 
-                    WheelHandler {
-                        target: repoScroll
-                        onWheel: function(event) {
-                            var delta = event.pixelDelta.y
-                            if (!delta) {
-                                delta = (event.angleDelta.y / 120) * Qt.styleHints.wheelScrollLines * 20
-                            }
-
-                            if (!delta) {
-                                return
-                            }
-
-                            var maximum = Math.max(0, repoScroll.contentHeight - repoScroll.height)
-                            repoScroll.contentY = Math.max(0, Math.min(maximum, repoScroll.contentY - delta))
-                            event.accepted = true
-                        }
-                    }
-
-                    ColumnLayout {
-                        id: repoColumn
-                        width: parent.width
-                        spacing: 8
-
-                        Repeater {
-                            model: repositories
-
-                            Rectangle {
+                    delegate: Rectangle {
                                 id: repoCard
 
                                 property bool dropTarget: false
                                 property string dragFullName: (modelData.fullName || "").toString().toLowerCase()
                                 property int repoIndex: index
 
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 196
+                                width: repoList.width
+                                height: 196
                                 color: dropTarget ? "#1D1A24" : "#141528"
                                 border.color: dropTarget ? "#F2C572" : statusColor(modelData.status)
                                 border.width: 1
@@ -1404,8 +1378,6 @@ ShellRoot {
                                         }
                                     }
                                 }
-                            }
-                        }
                     }
                 }
             }
