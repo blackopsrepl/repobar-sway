@@ -187,6 +187,24 @@ class StoreTest < Minitest::Test
     assert_equal ["three/three", "one/one", "two/two"], provider_snapshot.dig(:view, :repositories).map { |repo| repo[:fullName] }
   end
 
+  def test_failed_refresh_keeps_the_last_confirmed_repository_snapshot
+    config_path = write_test_config(settings: { showContributionHeader: false })
+    config = RepoBar::Core::Config.load_config(config_path)
+    RepoBar::Runtime::State.write_snapshot(
+      config,
+      RepoBar::Runtime::State.build_snapshot(config, [sample_repo(name: "stable/repository")], [], { provider: "github" }, Time.now.utc)
+    )
+
+    RepoBar::Core::GitHub.stub(:auth_status, ->(*) { { authenticated: true, provider: "github", login: "pvd" } }) do
+      RepoBar::Core::GitHub.stub(:fetch_repositories, ->(*) { raise "GitHub HTTP 503: service unavailable" }) do
+        assert_raises(RuntimeError) { RepoBar::Runtime::Store.refresh_effect(config_path) }
+      end
+    end
+
+    snapshot = RepoBar::Runtime::State.read_snapshot(config)
+    assert_equal ["stable/repository"], snapshot.dig(:view, :repositories).map { |repo| repo[:fullName] }
+  end
+
   def test_daemon_refresh_requests_coalesce_while_refresh_is_running
     config_path = write_test_config
     refresh_state = { thread: nil, pending: false, mutex: Mutex.new }

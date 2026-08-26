@@ -1160,11 +1160,30 @@ ShellRoot {
                 }
 
                 Flickable {
+                    id: repoScroll
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     contentWidth: width
                     contentHeight: repoColumn.implicitHeight
                     clip: true
+
+                    WheelHandler {
+                        target: repoScroll
+                        onWheel: function(event) {
+                            var delta = event.pixelDelta.y
+                            if (!delta) {
+                                delta = (event.angleDelta.y / 120) * Qt.styleHints.wheelScrollLines * 20
+                            }
+
+                            if (!delta) {
+                                return
+                            }
+
+                            var maximum = Math.max(0, repoScroll.contentHeight - repoScroll.height)
+                            repoScroll.contentY = Math.max(0, Math.min(maximum, repoScroll.contentY - delta))
+                            event.accepted = true
+                        }
+                    }
 
                     ColumnLayout {
                         id: repoColumn

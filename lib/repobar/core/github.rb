@@ -96,7 +96,11 @@ module RepoBar
       def repository(config, token, full_name)
         response = request(config, "/repos/#{full_name}", token: token)
         map_repo_item(response.data, response.headers, config)
-      rescue StandardError
+      rescue StandardError => e
+        # A missing repository is a confirmed removal. Other failures must reach the
+        # refresh transaction so it retains the last confirmed repository snapshot.
+        raise unless e.message.match?(/\bHTTP 404:/)
+
         nil
       end
 

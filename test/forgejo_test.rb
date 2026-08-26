@@ -56,6 +56,19 @@ class ForgejoTest < Minitest::Test
     end
   end
 
+  def test_fetch_repositories_propagates_transient_pinned_lookup_failures
+    config = build_config
+    config[:repoList][:pinnedRepositories] = ["one/one"]
+
+    RepoBar::Core::GitHub.stub(:access_token, "token") do
+      RepoBar::Core::GitHub.stub(:request, ->(*) { raise "GitHub HTTP 503: service unavailable" }) do
+        error = assert_raises(RuntimeError) { RepoBar::Core::GitHub.fetch_repositories(config) }
+
+        assert_match "HTTP 503", error.message
+      end
+    end
+  end
+
   def test_github_heatmap_uses_recent_commit_activity
     config = build_config
     today = Date.today.iso8601
