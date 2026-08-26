@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.0.1](///compare/v1.0.0...v1.0.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **quickshell:** accelerate repository wheel scrolling 65a100f
+* **quickshell:** accumulate repository wheel velocity 0782ac7
+* **quickshell:** bind wheel speed to repository list d0e1864
+* **quickshell:** use a native repository list d308191
+* **runtime:** retain repositories on transient refresh failures 22346ae
+
 ## [1.0.0](///compare/v0.1.1...v1.0.0) (2026-05-16)
 
 
