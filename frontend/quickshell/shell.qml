@@ -1167,12 +1167,22 @@ ShellRoot {
                     spacing: 8
                     model: repositories
 
-                    WheelHandler {
-                        target: repoList
-                        property: "contentY"
-                        rotationScale: -12
-                        acceptedDevices: PointerDevice.Mouse
-                        blocking: true
+                    MouseArea {
+                        property int wheelFlickSpeed: 5
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        scrollGestureEnabled: false
+                        onWheel: function(event) {
+                            var velocity = event.angleDelta.y * wheelFlickSpeed
+                            if (repoList.verticalOvershoot !== 0 ||
+                                    (velocity > 0 && repoList.verticalVelocity <= 0) ||
+                                    (velocity < 0 && repoList.verticalVelocity >= 0)) {
+                                repoList.flick(0, velocity - repoList.verticalVelocity)
+                            } else {
+                                repoList.cancelFlick()
+                            }
+                            event.accepted = true
+                        }
                     }
 
                     delegate: Rectangle {
