@@ -1161,11 +1161,24 @@ ShellRoot {
 
                 ListView {
                     id: repoList
+                    property real wheelScrollMultiplier: 3
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
                     spacing: 8
                     model: repositories
+
+                    WheelHandler {
+                        target: null
+                        acceptedDevices: PointerDevice.Mouse
+                        blocking: true
+                        onWheel: function(event) {
+                            var delta = (event.angleDelta.y / 120) * Qt.styleHints.wheelScrollLines * 20
+                            var maximum = Math.max(0, repoList.contentHeight - repoList.height)
+                            repoList.contentY = Math.max(0, Math.min(maximum, repoList.contentY - (delta * repoList.wheelScrollMultiplier)))
+                            event.accepted = true
+                        }
+                    }
 
                     delegate: Rectangle {
                                 id: repoCard
