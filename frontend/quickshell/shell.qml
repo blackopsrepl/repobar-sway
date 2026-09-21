@@ -16,6 +16,62 @@ ShellRoot {
     property string stateEventPath: stateDir + "/state-event.json"
     property string textFont: "Fira Code"
 
+    // Omarchy theme wiring: live-follows the active Omarchy theme palette
+    // (the same colors.toml the Omarchy shell reads). Falls back to the
+    // built-in palette where a key is absent or Omarchy is not running.
+    property string themeColorsPath: Quickshell.env("OMARCHY_THEME_COLORS") || ((Quickshell.env("HOME") || "") + "/.local/state/omarchy/current/theme/colors.toml")
+    property var themePalette: ({})
+
+    function applyThemeColors(raw) {
+        var parsed = {}
+        var lines = String(raw || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var match = lines[i].match(/^\s*([A-Za-z0-9_-]+)\s*=\s*["']?(#[0-9A-Fa-f]{6})/)
+            if (match)
+                parsed[match[1]] = match[2]
+        }
+        root.themePalette = parsed
+    }
+
+    function themeColor(key, fallback) {
+        var value = root.themePalette[key]
+        return (typeof value === "string" && value.length > 0) ? value : fallback
+    }
+
+    readonly property QtObject theme: QtObject {
+        readonly property color bg: root.themeColor("background", "#0B0C16")
+        readonly property color bgDeep: root.themeColor("dark_background", "#050711")
+        readonly property color surfaceDeep: root.themeColor("selection", "#0F1324")
+        readonly property color surfaceAlt: root.themeColor("lighter_background", "#141528")
+        readonly property color surfaceHover: root.themeColor("selection", "#18233C")
+        readonly property color surfaceSelect: root.themeColor("muted", "#202848")
+        readonly property color surfaceDown: root.themeColor("muted", "#223354")
+        readonly property color border: root.themeColor("muted", "#253057")
+        readonly property color borderStrong: root.themeColor("dark_foreground", "#4A557C")
+        readonly property color text: root.themeColor("bright_foreground", "#DDF7FF")
+        readonly property color textMuted: root.themeColor("dark_foreground", "#6A6E95")
+        readonly property color good: root.themeColor("green", "#82FB9C")
+        readonly property color goodSoft: root.themeColor("bright_green", "#9CF7C2")
+        readonly property color info: root.themeColor("bright_cyan", "#85E1FB")
+        readonly property color accent: root.themeColor("accent", "#8FA4D8")
+        readonly property color warn: root.themeColor("yellow", "#F2C572")
+        readonly property color bad: root.themeColor("red", "#E06C75")
+        readonly property color infoFill: Qt.rgba(root.theme.info.r, root.theme.info.g, root.theme.info.b, 0.16)
+        readonly property color goodFill: Qt.rgba(root.theme.goodSoft.r, root.theme.goodSoft.g, root.theme.goodSoft.b, 0.16)
+        readonly property color warnFill: Qt.rgba(root.theme.warn.r, root.theme.warn.g, root.theme.warn.b, 0.16)
+        readonly property color warnHover: Qt.rgba(root.theme.warn.r, root.theme.warn.g, root.theme.warn.b, 0.08)
+    }
+
+    FileView {
+        id: themeFile
+        path: root.themeColorsPath
+        watchChanges: true
+        printErrors: false
+        onLoaded: root.applyThemeColors(text())
+        onFileChanged: reload()
+        onLoadFailed: root.applyThemeColors("")
+    }
+
     property var viewData: snapshotAdapter.view && snapshotAdapter.view.summary ? snapshotAdapter.view : ({ summary: {}, chip: {}, repositories: [] })
     property var repositories: viewData.repositories || []
     property var selectedRepository: null
@@ -36,10 +92,10 @@ ShellRoot {
         property string iconName: "open"
         property string tooltip: ""
         property bool active: false
-        property string iconColor: "#DDF7FF"
-        property string accentColor: "#85E1FB"
-        property string activeFillColor: "#1B3A40"
-        property string disabledColor: "#4A557C"
+        property color iconColor: root.theme.text
+        property color accentColor: root.theme.info
+        property color activeFillColor: root.theme.infoFill
+        property color disabledColor: root.theme.borderStrong
 
         Layout.preferredWidth: 34
         Layout.preferredHeight: 34
@@ -56,9 +112,9 @@ ShellRoot {
 
         background: Rectangle {
             radius: 4
-            color: !actionButton.enabled ? "#101326" : actionButton.down ? "#223354" : actionButton.hovered ? "#18233C" : actionButton.active ? actionButton.activeFillColor : "#0F1324"
+            color: !actionButton.enabled ? root.theme.surfaceDeep : actionButton.down ? root.theme.surfaceDown : actionButton.hovered ? root.theme.surfaceHover : actionButton.active ? actionButton.activeFillColor : root.theme.surfaceDeep
             border.width: 1
-            border.color: !actionButton.enabled ? "#253057" : actionButton.active ? actionButton.accentColor : actionButton.hovered ? "#85E1FB" : "#253057"
+            border.color: !actionButton.enabled ? root.theme.border : actionButton.active ? actionButton.accentColor : actionButton.hovered ? root.theme.info : root.theme.border
         }
 
         contentItem: Item {
@@ -173,8 +229,8 @@ ShellRoot {
         property string tooltip: ""
         property string dragFullName: ""
         property bool active: dragArea.drag.active
-        property string iconColor: "#DDF7FF"
-        property string accentColor: "#F2C572"
+        property color iconColor: root.theme.text
+        property color accentColor: root.theme.warn
 
         Layout.preferredWidth: 34
         Layout.preferredHeight: 34
@@ -195,9 +251,9 @@ ShellRoot {
         Rectangle {
             anchors.fill: parent
             radius: 4
-            color: handle.active ? "#2E281B" : dragArea.containsMouse ? "#221F19" : "#0F1324"
+            color: handle.active ? root.theme.warnFill : dragArea.containsMouse ? root.theme.warnHover : root.theme.surfaceDeep
             border.width: 1
-            border.color: handle.active || dragArea.containsMouse ? handle.accentColor : "#253057"
+            border.color: handle.active || dragArea.containsMouse ? handle.accentColor : root.theme.border
         }
 
         Canvas {
@@ -244,15 +300,15 @@ ShellRoot {
 
     function statusColor(status) {
         if (status === "error" || status === "ci-failing") {
-            return "#E06C75"
+            return root.theme.bad
         }
         if (status === "dirty" || status === "work") {
-            return "#E5C07B"
+            return root.theme.warn
         }
         if (status === "pending") {
-            return "#85E1FB"
+            return root.theme.info
         }
-        return "#82FB9C"
+        return root.theme.good
     }
 
     function runRepobar(args) {
@@ -307,24 +363,24 @@ ShellRoot {
 
     function heatmapColor(cell) {
         if (!cell) {
-            return "#202848"
+            return root.theme.surfaceSelect
         }
         if (cell.empty) {
-            return "#0B0C16"
+            return root.theme.bg
         }
         if (cell.intensity >= 4) {
-            return "#50F872"
+            return root.theme.goodSoft
         }
         if (cell.intensity === 3) {
-            return "#4FE88F"
+            return root.theme.good
         }
         if (cell.intensity === 2) {
-            return "#82FB9C"
+            return root.theme.good
         }
         if (cell.intensity === 1) {
-            return "#253057"
+            return root.theme.border
         }
-        return "#202848"
+        return root.theme.surfaceSelect
     }
 
     function accountHeatmapText() {
@@ -540,7 +596,7 @@ ShellRoot {
 
             Rectangle {
                 anchors.fill: parent
-                color: "#050711"
+                color: root.theme.bgDeep
                 opacity: 0.66
             }
 
@@ -549,8 +605,8 @@ ShellRoot {
                 anchors.centerIn: parent
                 width: Math.min(960, Math.max(320, panel.width - 36))
                 height: Math.min(panel.height - 16, Math.max(420, panel.height - (panel.verticalMargin * 2)))
-                color: "#0B0C16"
-                border.color: "#82FB9C"
+                color: root.theme.bg
+                border.color: root.theme.good
                 border.width: 1
                 radius: 4
                 focus: true
@@ -574,7 +630,7 @@ ShellRoot {
                             spacing: 2
                             Text {
                                 text: "RepoBar"
-                                color: "#DDF7FF"
+                                color: root.theme.text
                                 font.family: root.textFont
                                 font.pixelSize: 22
                                 font.bold: true
@@ -582,7 +638,7 @@ ShellRoot {
                             Text {
                                 Layout.fillWidth: true
                                 text: "@" + (viewData.summary.account || "not authenticated") + "  " + (viewData.summary.repoCount || 0) + " repos  " + (viewData.summary.openPulls || 0) + " PR  " + (viewData.summary.openIssues || 0) + " issues"
-                                color: "#9CF7C2"
+                                color: root.theme.goodSoft
                                 font.family: root.textFont
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
@@ -613,8 +669,8 @@ ShellRoot {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 104
                         visible: !!(viewData.accountHeatmap && viewData.accountHeatmap.available)
-                        color: "#101326"
-                        border.color: "#253057"
+                        color: root.theme.surfaceDeep
+                        border.color: root.theme.border
                         border.width: 1
                         radius: 4
 
@@ -630,7 +686,7 @@ ShellRoot {
 
                                 Text {
                                     text: root.accountHeatmapText()
-                                    color: "#9CF7C2"
+                                    color: root.theme.goodSoft
                                     font.family: root.textFont
                                     font.pixelSize: 11
                                     Layout.fillWidth: true
@@ -676,8 +732,8 @@ ShellRoot {
                                 Layout.preferredWidth: 220
                                 Layout.fillHeight: true
                                 visible: modalFrame.width >= 760
-                                color: "#0B0C16"
-                                border.color: "#253057"
+                                color: root.theme.bg
+                                border.color: root.theme.border
                                 border.width: 1
                                 radius: 3
 
@@ -689,7 +745,7 @@ ShellRoot {
                                     Text {
                                         Layout.fillWidth: true
                                         text: "Contribution summary"
-                                        color: "#85E1FB"
+                                        color: root.theme.info
                                         font.family: root.textFont
                                         font.pixelSize: 10
                                         font.bold: true
@@ -704,14 +760,14 @@ ShellRoot {
 
                                         Text {
                                             text: "Active"
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             text: (root.accountHeatmapStats().activeDays || 0) + " days"
-                                            color: "#DDF7FF"
+                                            color: root.theme.text
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -719,14 +775,14 @@ ShellRoot {
 
                                         Text {
                                             text: "Streak"
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             text: (root.accountHeatmapStats().currentStreak || 0) + " days"
-                                            color: "#DDF7FF"
+                                            color: root.theme.text
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -734,14 +790,14 @@ ShellRoot {
 
                                         Text {
                                             text: "Best day"
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             text: root.accountHeatmapStats().bestDayText || "none"
-                                            color: "#DDF7FF"
+                                            color: root.theme.text
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -749,14 +805,14 @@ ShellRoot {
 
                                         Text {
                                             text: "Peak"
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                         }
                                         Text {
                                             Layout.fillWidth: true
                                             text: (root.accountHeatmapStats().bestCount || 0) + " contributions"
-                                            color: "#DDF7FF"
+                                            color: root.theme.text
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -804,7 +860,7 @@ ShellRoot {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 1
-                    color: "#253057"
+                    color: root.theme.border
                 }
 
                 ColumnLayout {
@@ -819,7 +875,7 @@ ShellRoot {
                         Text {
                             Layout.fillWidth: true
                             text: root.searchStatusText()
-                            color: searchData.status === "error" ? "#E06C75" : "#9CF7C2"
+                            color: searchData.status === "error" ? root.theme.bad : root.theme.goodSoft
                             font.family: root.textFont
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -839,8 +895,8 @@ ShellRoot {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 74
-                            color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? "#202848" : "#141528"
-                            border.color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? "#85E1FB" : "#253057"
+                            color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? root.theme.surfaceSelect : root.theme.surfaceAlt
+                            border.color: searchData.selectedFullName === modelData.fullName.toString().toLowerCase() ? root.theme.info : root.theme.border
                             border.width: 1
                             radius: 4
 
@@ -858,8 +914,8 @@ ShellRoot {
                                     Layout.preferredWidth: 34
                                     Layout.preferredHeight: 34
                                     radius: 4
-                                    color: "#0B0C16"
-                                    border.color: "#253057"
+                                    color: root.theme.bg
+                                    border.color: root.theme.border
                                     border.width: 1
                                     clip: true
 
@@ -875,7 +931,7 @@ ShellRoot {
                                     Text {
                                         anchors.centerIn: parent
                                         text: (modelData.owner || "?").toString().slice(0, 1).toUpperCase()
-                                        color: "#9CF7C2"
+                                        color: root.theme.goodSoft
                                         font.family: root.textFont
                                         font.pixelSize: 13
                                         font.bold: true
@@ -889,7 +945,7 @@ ShellRoot {
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.fullName || ""
-                                        color: "#DDF7FF"
+                                        color: root.theme.text
                                         font.family: root.textFont
                                         font.pixelSize: 13
                                         font.bold: true
@@ -898,7 +954,7 @@ ShellRoot {
                                     Text {
                                         Layout.fillWidth: true
                                         text: modelData.description || "No description"
-                                        color: "#8FA4D8"
+                                        color: root.theme.accent
                                         font.family: root.textFont
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
@@ -906,7 +962,7 @@ ShellRoot {
                                     Text {
                                         Layout.fillWidth: true
                                         text: "Stars " + ((modelData.stats && modelData.stats.stars) || 0)
-                                        color: "#6A6E95"
+                                        color: root.theme.textMuted
                                         font.family: root.textFont
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
@@ -920,7 +976,7 @@ ShellRoot {
                                     RepoActionButton {
                                         iconName: "open"
                                         tooltip: "Open repository"
-                                        accentColor: "#85E1FB"
+                                        accentColor: root.theme.info
                                         onClicked: {
                                             root.runRepobar(["open", root.repoUrl(modelData)])
                                             root.clearSearchUi()
@@ -931,8 +987,8 @@ ShellRoot {
                                         tooltip: root.isPinned(modelData.fullName) ? "Already pinned" : "Pin repository"
                                         active: root.isPinned(modelData.fullName)
                                         enabled: !root.isPinned(modelData.fullName)
-                                        accentColor: "#9CF7C2"
-                                        activeFillColor: "#14342F"
+                                        accentColor: root.theme.goodSoft
+                                        activeFillColor: root.theme.goodFill
                                         onClicked: {
                                             root.runRepobar(["pin", modelData.fullName])
                                             root.clearSearchUi()
@@ -948,8 +1004,8 @@ ShellRoot {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 220
                     visible: root.selectedRepository !== null
-                    color: "#101326"
-                    border.color: "#253057"
+                    color: root.theme.surfaceDeep
+                    border.color: root.theme.border
                     border.width: 1
                     radius: 4
 
@@ -965,7 +1021,7 @@ ShellRoot {
                             Text {
                                 Layout.fillWidth: true
                                 text: root.selectedRepository ? (root.selectedRepository.fullName + "  " + root.workLabel(root.selectedRepository)) : ""
-                                color: "#DDF7FF"
+                                color: root.theme.text
                                 font.family: root.textFont
                                 font.pixelSize: 13
                                 font.bold: true
@@ -1003,7 +1059,7 @@ ShellRoot {
                                     Layout.fillWidth: true
                                     visible: root.selectedRepository !== null && root.workItems(root.selectedRepository) === 0
                                     text: "No open issues or pull requests in the cached snapshot."
-                                    color: "#6A6E95"
+                                    color: root.theme.textMuted
                                     font.family: root.textFont
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
@@ -1013,7 +1069,7 @@ ShellRoot {
                                     Layout.fillWidth: true
                                     visible: root.selectedRepository && root.selectedRepository.pulls && root.selectedRepository.pulls.length > 0
                                     text: "Pull requests"
-                                    color: "#85E1FB"
+                                    color: root.theme.info
                                     font.family: root.textFont
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1033,7 +1089,7 @@ ShellRoot {
                                             Text {
                                                 Layout.fillWidth: true
                                                 text: "#" + modelData.number + " " + (modelData.draft ? "[draft] " : "") + modelData.title
-                                                color: "#DDF7FF"
+                                                color: root.theme.text
                                                 font.family: root.textFont
                                                 font.pixelSize: 12
                                                 font.bold: true
@@ -1042,7 +1098,7 @@ ShellRoot {
 
                                             Text {
                                                 text: "@" + modelData.author + "  " + modelData.updatedText
-                                                color: "#6A6E95"
+                                                color: root.theme.textMuted
                                                 font.family: root.textFont
                                                 font.pixelSize: 10
                                                 Layout.preferredWidth: 150
@@ -1061,7 +1117,7 @@ ShellRoot {
                                         Text {
                                             width: parent.width
                                             text: modelData.body || "No description."
-                                            color: "#8FA4D8"
+                                            color: root.theme.accent
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             wrapMode: Text.Wrap
@@ -1072,7 +1128,7 @@ ShellRoot {
                                         Rectangle {
                                             width: parent.width
                                             height: 1
-                                            color: "#253057"
+                                            color: root.theme.border
                                         }
                                     }
                                 }
@@ -1081,7 +1137,7 @@ ShellRoot {
                                     Layout.fillWidth: true
                                     visible: root.selectedRepository && root.selectedRepository.issues && root.selectedRepository.issues.length > 0
                                     text: "Issues"
-                                    color: "#85E1FB"
+                                    color: root.theme.info
                                     font.family: root.textFont
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1101,7 +1157,7 @@ ShellRoot {
                                             Text {
                                                 Layout.fillWidth: true
                                                 text: "#" + modelData.number + " " + modelData.title
-                                                color: "#DDF7FF"
+                                                color: root.theme.text
                                                 font.family: root.textFont
                                                 font.pixelSize: 12
                                                 font.bold: true
@@ -1110,7 +1166,7 @@ ShellRoot {
 
                                             Text {
                                                 text: "@" + modelData.author + "  " + modelData.updatedText
-                                                color: "#6A6E95"
+                                                color: root.theme.textMuted
                                                 font.family: root.textFont
                                                 font.pixelSize: 10
                                                 Layout.preferredWidth: 150
@@ -1129,7 +1185,7 @@ ShellRoot {
                                         Text {
                                             width: parent.width
                                             text: modelData.body || "No description."
-                                            color: "#8FA4D8"
+                                            color: root.theme.accent
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             wrapMode: Text.Wrap
@@ -1141,7 +1197,7 @@ ShellRoot {
                                             width: parent.width
                                             visible: modelData.labels && modelData.labels.length > 0
                                             text: "Labels: " + modelData.labels.join(", ")
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -1150,7 +1206,7 @@ ShellRoot {
                                         Rectangle {
                                             width: parent.width
                                             height: 1
-                                            color: "#253057"
+                                            color: root.theme.border
                                         }
                                     }
                                 }
@@ -1194,8 +1250,8 @@ ShellRoot {
 
                                 width: repoList.width
                                 height: 196
-                                color: dropTarget ? "#1D1A24" : "#141528"
-                                border.color: dropTarget ? "#F2C572" : statusColor(modelData.status)
+                                color: dropTarget ? root.theme.warnFill : root.theme.surfaceAlt
+                                border.color: dropTarget ? root.theme.warn : statusColor(modelData.status)
                                 border.width: 1
                                 radius: 4
 
@@ -1238,8 +1294,8 @@ ShellRoot {
                                             Layout.preferredWidth: 42
                                             Layout.preferredHeight: 42
                                             radius: 4
-                                            color: "#0B0C16"
-                                            border.color: "#253057"
+                                            color: root.theme.bg
+                                            border.color: root.theme.border
                                             border.width: 1
                                             clip: true
 
@@ -1255,7 +1311,7 @@ ShellRoot {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: (modelData.owner || "?").toString().slice(0, 1).toUpperCase()
-                                                color: "#9CF7C2"
+                                                color: root.theme.goodSoft
                                                 font.family: root.textFont
                                                 font.pixelSize: 16
                                                 font.bold: true
@@ -1268,14 +1324,14 @@ ShellRoot {
                                             spacing: 4
                                             Text {
                                                 text: modelData.fullName || ""
-                                                color: "#DDF7FF"
+                                                color: root.theme.text
                                                 font.family: root.textFont
                                                 font.pixelSize: 16
                                                 font.bold: true
                                             }
                                             Text {
                                                 text: modelData.pending ? "Pending refresh" : (modelData.description || "")
-                                                color: modelData.pending ? "#85E1FB" : "#8FA4D8"
+                                                color: modelData.pending ? root.theme.info : root.theme.accent
                                                 font.family: root.textFont
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
@@ -1283,7 +1339,7 @@ ShellRoot {
                                             }
                                             Text {
                                                 text: "CI " + (modelData.ciStatus || "unknown") + "  PR " + (modelData.openPulls || 0) + "  Issues " + (modelData.openIssues || 0) + "  Stars " + (modelData.stars || 0) + "  Updated " + (modelData.pushedText || "unknown")
-                                                color: "#9CF7C2"
+                                                color: root.theme.goodSoft
                                                 font.family: root.textFont
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -1291,7 +1347,7 @@ ShellRoot {
                                             }
                                             Text {
                                                 text: modelData.local ? ("Local " + modelData.local.branch + "  ahead " + modelData.local.ahead + " behind " + modelData.local.behind + " dirty " + modelData.local.dirtyCount) : "No matched local checkout"
-                                                color: modelData.local && modelData.local.dirty ? "#E5C07B" : "#6A6E95"
+                                                color: modelData.local && modelData.local.dirty ? root.theme.warn : root.theme.textMuted
                                                 font.family: root.textFont
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
@@ -1299,7 +1355,7 @@ ShellRoot {
                                             }
                                             Text {
                                                 text: (modelData.latestRelease ? ("Release " + modelData.latestRelease.tag + "  ") : "") + (modelData.latestActivity ? modelData.latestActivity.title : "No recent activity")
-                                                color: "#85E1FB"
+                                                color: root.theme.info
                                                 font.family: root.textFont
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
@@ -1315,7 +1371,7 @@ ShellRoot {
 
                                         Text {
                                             text: heatmapText(modelData)
-                                            color: "#6A6E95"
+                                            color: root.theme.textMuted
                                             font.family: root.textFont
                                             font.pixelSize: 10
                                             Layout.preferredWidth: modalFrame.width < 560 ? 108 : 136
@@ -1359,7 +1415,7 @@ ShellRoot {
                                             RepoActionButton {
                                                 iconName: "open"
                                                 tooltip: "Open repository"
-                                                accentColor: "#85E1FB"
+                                                accentColor: root.theme.info
                                                 onClicked: runRepobar(["open", root.repoUrl(modelData)])
                                             }
 
@@ -1367,14 +1423,14 @@ ShellRoot {
                                                 iconName: "read"
                                                 tooltip: "Read work items"
                                                 enabled: root.workItems(modelData) > 0
-                                                accentColor: "#9CF7C2"
+                                                accentColor: root.theme.goodSoft
                                                 onClicked: root.selectedRepository = modelData
                                             }
 
                                             RepoActionButton {
                                                 iconName: "refresh"
                                                 tooltip: "Refresh repositories"
-                                                accentColor: "#85E1FB"
+                                                accentColor: root.theme.info
                                                 onClicked: runRepobar(["refresh"])
                                             }
 
@@ -1382,15 +1438,15 @@ ShellRoot {
                                                 iconName: modelData.pinned ? "pinFilled" : "pin"
                                                 tooltip: modelData.pinned ? "Unpin repository" : "Pin repository"
                                                 active: modelData.pinned
-                                                accentColor: "#9CF7C2"
-                                                activeFillColor: "#14342F"
+                                                accentColor: root.theme.goodSoft
+                                                activeFillColor: root.theme.goodFill
                                                 onClicked: runRepobar([modelData.pinned ? "unpin" : "pin", modelData.fullName])
                                             }
 
                                             RepoActionButton {
                                                 iconName: "hide"
                                                 tooltip: "Hide repository"
-                                                accentColor: "#E06C75"
+                                                accentColor: root.theme.bad
                                                 onClicked: runRepobar(["hide", modelData.fullName])
                                             }
                                         }

@@ -97,7 +97,7 @@ bin/repobar omarchy remove
 exec-once = repobar daemon
 ```
 
-The `waybar` chip contract is unchanged: Waybar on sway and the Omarchy shell on Hyprland both render the same cached-state JSON.
+The `waybar` chip contract is unchanged: Waybar on sway and the Omarchy shell on Hyprland both render the same cached-state JSON. The QuickShell panel follows the active Omarchy theme (live, via `theme/colors.toml`); outside Omarchy it keeps the built-in palette.
 
 ## Commands
 
