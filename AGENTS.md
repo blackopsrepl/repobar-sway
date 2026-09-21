@@ -5,7 +5,7 @@
 - `bin/repobar`: Ruby CLI entrypoint.
 - `bin/release-check`: local release gate for syntax, tests, CLI smoke, Forgejo smoke, archive import smoke, and QuickShell load when available.
 - `lib/repobar/core`: config normalization, REST/GraphQL cache, GitHub.com/Forgejo API access, local git scanning, formatting, and process helpers.
-- `lib/repobar/runtime`: daemon, action store, cached state files, presenter, QuickShell launcher, and Waybar renderer.
+- `lib/repobar/runtime`: daemon, action store, cached state files, presenter, QuickShell launcher, Waybar renderer, and Omarchy shell bar installer.
 - `frontend/quickshell/shell.qml`: the only human-facing UI.
 - `docs/`: architecture, CLI reference, and UI assets.
 - `test/`: deterministic Ruby tests.
@@ -30,6 +30,7 @@
 - Keep runtime actions daemon-owned. CLI and QuickShell dispatch actions; `Runtime::Daemon` and `Runtime::Store` own refresh, search, provider switching, pin/unpin/hide/show, pinned repo moves, and projection.
 - Keep QuickShell presentation backed by `snapshot.json`, `ui.json`, `search.json`, and `state-event.json`.
 - Waybar must remain a cached-state renderer, not a fetch path.
+- Omarchy shell integration must edit `~/.config/omarchy/shell.json` only through `Runtime::Omarchy` (the `omarchy` CLI command); never hand-edit the seeded layout elsewhere.
 - Provider switching must preserve provider-specific cached snapshots under `providers/github.json` and `providers/forgejo.json`, restore the target snapshot synchronously when available, and keep switching independent of network latency.
 - Refresh results must not overwrite the active provider snapshot if the refresh started under an older provider/config identity. Late refreshes should update only their original provider cache.
 - Same-provider stale refreshes must preserve newer pinned/hidden visibility state before writing provider caches, including pinned repo order changes made while the refresh was in flight.

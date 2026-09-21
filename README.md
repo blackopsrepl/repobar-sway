@@ -81,6 +81,24 @@ Waybar does not fetch GitHub, Forgejo, or local repository state by itself. If t
 
 On SolverForge Linux, the managed Waybar integration starts companion daemons through `solverforge-waybar-companions-start`, launched from Sway `exec_always` beside Waybar. Edit that managed default layer, not symlinked files under `~/.config/waybar`.
 
+## Hyprland + Omarchy
+
+On a Hyprland desktop running the Omarchy shell, the Waybar chip mounts as a bar command module:
+
+```bash
+bin/repobar omarchy install   # adds the repobar module next to omarchy.weather
+bin/repobar omarchy status
+bin/repobar omarchy remove
+```
+
+`omarchy install` seeds `~/.config/omarchy/shell.json` from the Omarchy defaults when the user file does not exist yet, inserts a `type: command` module (default placement: `--after omarchy.weather`), and asks the running shell to reload its config. The module polls `repobar waybar render` on an interval (`--interval`, default 5), opens the QuickShell panel on left click, and triggers the daemon refresh path on middle click. The daemon itself is not started by the module; launch it at session startup, for example from Hyprland:
+
+```ini
+exec-once = repobar daemon
+```
+
+The `waybar` chip contract is unchanged: Waybar on sway and the Omarchy shell on Hyprland both render the same cached-state JSON.
+
 ## Commands
 
 ```bash
@@ -149,6 +167,9 @@ bin/repobar waybar render
 bin/repobar waybar refresh
 bin/repobar waybar panel
 bin/repobar waybar open
+bin/repobar omarchy install
+bin/repobar omarchy status
+bin/repobar omarchy remove
 bin/release-check
 ```
 
