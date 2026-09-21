@@ -120,9 +120,14 @@ Visibility commands mutate `repoList.pinnedRepositories` and `repoList.hiddenRep
 - `repobar waybar refresh`
 - `repobar waybar panel`
 - `repobar waybar open`
+- `repobar omarchy install`
+- `repobar omarchy status`
+- `repobar omarchy remove`
 - `repobar open URL`
 
 `waybar render` reads cached state only. `waybar refresh` calls the daemon refresh path. Daemon-triggered refresh requests are coalesced so repeated UI actions can leave one active refresh and one pending follow-up, not one thread per click. `panel`, `ui open`, and `waybar panel` open the QuickShell panel.
+
+`omarchy install` mounts the Waybar chip as an Omarchy shell bar command module in `~/.config/omarchy/shell.json`, by default after `omarchy.weather`; it seeds the user file from the Omarchy defaults when missing. Flags: `--after ID`, `--section left|center|right`, `--index N`, `--interval SECONDS` (default 5), `--exec PATH`. `omarchy status` reports the installed module, and `omarchy remove` drops it.
 
 ## Settings
 
