@@ -80,7 +80,7 @@ module RepoBar
         config = Core::Config.default_config_path
         assert_equal(Shellwords.join([bin, "waybar", "render", "--config", config]), entry["exec"])
         assert_equal(Shellwords.join([bin, "panel", "--config", config]), entry["onClick"])
-        assert_equal(Shellwords.join([bin, "refresh", "--config", config]), entry["onMiddleClick"])
+        assert_equal(Shellwords.join([bin, "waybar", "refresh", "--config", config]), entry["onMiddleClick"])
       end
 
       def test_install_embeds_the_selected_config_path
@@ -92,7 +92,7 @@ module RepoBar
         entry = module_entry
         assert_equal(Shellwords.join([bin, "waybar", "render", "--config", config_path]), entry["exec"])
         assert_equal(Shellwords.join([bin, "panel", "--config", config_path]), entry["onClick"])
-        assert_equal(Shellwords.join([bin, "refresh", "--config", config_path]), entry["onMiddleClick"])
+        assert_equal(Shellwords.join([bin, "waybar", "refresh", "--config", config_path]), entry["onMiddleClick"])
       end
 
       def test_install_rejects_unknown_binary

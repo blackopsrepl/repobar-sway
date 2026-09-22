@@ -578,7 +578,7 @@ module RepoBar
       when "render"
         Runtime::Waybar.render(config_path)
       when "refresh"
-        Runtime::Daemon.refresh(config_path)
+        Runtime::Daemon.dispatch_action(config_path, type: "refresh")
       when "panel", "open"
         Runtime::QuickShell.open(config_path)
       else

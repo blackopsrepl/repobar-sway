@@ -114,7 +114,7 @@ module RepoBar
           "exec" => Shellwords.join([bin, "waybar", "render", "--config", config_path]),
           "interval" => interval,
           "onClick" => Shellwords.join([bin, "panel", "--config", config_path]),
-          "onMiddleClick" => Shellwords.join([bin, "refresh", "--config", config_path]),
+          "onMiddleClick" => Shellwords.join([bin, "waybar", "refresh", "--config", config_path]),
           "tooltip" => "RepoBar repo chip (left: panel, middle: refresh)"
         }
       end
