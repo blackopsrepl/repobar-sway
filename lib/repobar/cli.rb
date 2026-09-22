@@ -60,7 +60,7 @@ module RepoBar
       when "waybar"
         run_waybar_command(args, config_path)
       when "omarchy"
-        run_omarchy_command(args)
+        run_omarchy_command(args, config_path)
       when "open"
         run_open_command(args)
       when "repos"
@@ -587,7 +587,7 @@ module RepoBar
       0
     end
 
-    def run_omarchy_command(args)
+    def run_omarchy_command(args, config_path)
       subcommand = args[:positionals].first || "status"
       result = case subcommand
                when "install"
@@ -596,7 +596,8 @@ module RepoBar
                    section: args[:section],
                    index: args[:index],
                    interval: args[:interval] || Runtime::Omarchy::DEFAULT_INTERVAL,
-                   bin: args[:exec]
+                   bin: args[:exec],
+                   config_path: config_path
                  )
                when "remove"
                  Runtime::Omarchy.remove

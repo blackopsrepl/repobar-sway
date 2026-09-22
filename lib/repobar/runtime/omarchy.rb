@@ -18,13 +18,14 @@ module RepoBar
       DEFAULT_INTERVAL = 5
       DEFAULT_BIN = File.expand_path("../../../bin/repobar", __dir__)
 
-      def install(after: nil, section: nil, index: nil, interval: DEFAULT_INTERVAL, bin: nil)
+      def install(after: nil, section: nil, index: nil, interval: DEFAULT_INTERVAL, bin: nil, config_path: nil)
         interval = normalize_interval(interval)
         bin = resolve_bin(bin)
+        config_path = File.expand_path(config_path || Core::Config.default_config_path)
 
         document, source = load_shell_document
         normalize_document!(document)
-        entry = module_entry(bin, interval)
+        entry = module_entry(bin, interval, config_path)
         location = place!(document, entry, after: after, section: section, index: index)
         save_shell_document(document)
         refresh_shell
@@ -106,15 +107,14 @@ module RepoBar
         document
       end
 
-      def module_entry(bin, interval)
-        quoted = Shellwords.escape(bin)
+      def module_entry(bin, interval, config_path)
         {
           "id" => MODULE_ID,
           "type" => "command",
-          "exec" => "#{quoted} waybar render",
+          "exec" => Shellwords.join([bin, "waybar", "render", "--config", config_path]),
           "interval" => interval,
-          "onClick" => "#{quoted} panel",
-          "onMiddleClick" => "#{quoted} refresh",
+          "onClick" => Shellwords.join([bin, "panel", "--config", config_path]),
+          "onMiddleClick" => Shellwords.join([bin, "refresh", "--config", config_path]),
           "tooltip" => "RepoBar repo chip (left: panel, middle: refresh)"
         }
       end
