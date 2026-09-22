@@ -77,10 +77,22 @@ module RepoBar
         Omarchy.install(bin: bin)
 
         entry = module_entry
-        escaped = Shellwords.escape(bin)
-        assert_equal("#{escaped} waybar render", entry["exec"])
-        assert_equal("#{escaped} panel", entry["onClick"])
-        assert_equal("#{escaped} refresh", entry["onMiddleClick"])
+        config = Core::Config.default_config_path
+        assert_equal(Shellwords.join([bin, "waybar", "render", "--config", config]), entry["exec"])
+        assert_equal(Shellwords.join([bin, "panel", "--config", config]), entry["onClick"])
+        assert_equal(Shellwords.join([bin, "refresh", "--config", config]), entry["onMiddleClick"])
+      end
+
+      def test_install_embeds_the_selected_config_path
+        bin = fake_bin
+        config_path = File.join(Dir.home, "alt", "config.json")
+
+        Omarchy.install(bin: bin, config_path: config_path)
+
+        entry = module_entry
+        assert_equal(Shellwords.join([bin, "waybar", "render", "--config", config_path]), entry["exec"])
+        assert_equal(Shellwords.join([bin, "panel", "--config", config_path]), entry["onClick"])
+        assert_equal(Shellwords.join([bin, "refresh", "--config", config_path]), entry["onMiddleClick"])
       end
 
       def test_install_rejects_unknown_binary
