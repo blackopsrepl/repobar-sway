@@ -287,6 +287,34 @@ class StoreTest < Minitest::Test
     end
   end
 
+  def test_daemon_refresh_action_requests_a_coalesced_refresh
+    config_path = write_test_config
+    refresh_state = { thread: nil, pending: false, mutex: Mutex.new }
+    calls = []
+
+    RepoBar::Runtime::Daemon.stub(:request_refresh, ->(path, state) { calls << [path, state] }) do
+      result = RepoBar::Runtime::Daemon.handle_action(config_path, { type: "refresh" }, Mutex.new, [], refresh_state)
+      assert_equal "refresh_requested", result[:status]
+    end
+
+    assert_equal [[config_path, refresh_state]], calls
+  end
+
+  def test_waybar_refresh_dispatches_the_daemon_action
+    config_path = write_test_config
+    captured = nil
+
+    RepoBar::Runtime::Daemon.stub(:dispatch_action, ->(_path, action) { captured = action; { status: "refresh_requested" } }) do
+      RepoBar::Runtime::Daemon.stub(:refresh, ->(*) { raise "refresh should be a daemon action" }) do
+        _out, _err = capture_io do
+          assert_equal 0, RepoBar::CLI.run(["waybar", "refresh", "--config", config_path])
+        end
+      end
+    end
+
+    assert_equal "refresh", captured[:type]
+  end
+
   private
 
   def write_test_config(overrides = {})

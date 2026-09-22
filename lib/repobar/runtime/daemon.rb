@@ -150,6 +150,9 @@ module RepoBar
           when "show"
             result = Store.show_repo(config_path, action[:fullName])
             refresh_needed = true
+          when "refresh"
+            result = { status: "refresh_requested" }
+            refresh_needed = true
           when "search_start"
             result = Store.start_search(config_path, action[:query].to_s, limit: action[:limit].to_i.positive? ? action[:limit].to_i : 10)
             search_job = [result[:query], action[:limit].to_i.positive? ? action[:limit].to_i : 10, result[:requestId]]
