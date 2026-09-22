@@ -125,10 +125,12 @@ module RepoBar
         if section
           raise ArgumentError, "section must be left, center, or right" unless SECTIONS.include?(section)
 
-          at = index.nil? ? document["bar"]["layout"][section].length : Integer(index)
+          entries = document["bar"]["layout"][section]
+          at = index.nil? ? entries.length : Integer(index)
           raise ArgumentError, "index must be a non-negative integer" if at.negative?
+          raise ArgumentError, "index #{at} is out of range for #{section} (0..#{entries.length})" if at > entries.length
 
-          document["bar"]["layout"][section].insert(at, entry)
+          entries.insert(at, entry)
           return { section: section, index: at }
         end
 

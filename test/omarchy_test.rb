@@ -59,6 +59,14 @@ module RepoBar
         assert_equal %w[omarchy.tray repobar], ids(right)
       end
 
+      def test_install_rejects_index_beyond_section_length
+        write_user_shell(default_shell)
+        error = assert_raises(ArgumentError) { Omarchy.install(bin: fake_bin, section: "right", index: 2) }
+
+        assert_match(/out of range/, error.message)
+        assert_equal %w[omarchy.tray], ids(read_user_shell.dig("bar", "layout", "right"))
+      end
+
       def test_install_falls_back_to_center_end_for_unknown_anchor
         result = Omarchy.install(bin: fake_bin, after: "omarchy.does-not-exist")
 
